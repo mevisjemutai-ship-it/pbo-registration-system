@@ -28,12 +28,16 @@ $activePage = 'applications';
 $connection = null;
 
 if (isset($pdo) && $pdo instanceof PDO) {
+
     $connection = $pdo;
+
 } elseif (isset($db) && $db instanceof PDO) {
+
     $connection = $db;
 }
 
 if (!$connection instanceof PDO) {
+
     throw new RuntimeException(
         'Database connection was not initialized as a PDO instance.'
     );
@@ -46,17 +50,22 @@ if (!$connection instanceof PDO) {
 |--------------------------------------------------------------------------
 */
 
-$userId = (int) ($_SESSION['user_id'] ?? 0);
+$userId =
+    (int) ($_SESSION['user_id'] ?? 0);
 
 if ($userId <= 0) {
-    header('Location: /pbo-portal/login.php');
+
+    header(
+        'Location: /pbo-portal/login.php'
+    );
+
     exit;
 }
 
 
 /*
 |--------------------------------------------------------------------------
-| Helpers
+| Helper
 |--------------------------------------------------------------------------
 */
 
@@ -77,10 +86,15 @@ function e(?string $value): string
 */
 
 if (empty($_SESSION['csrf_token'])) {
-    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+
+    $_SESSION['csrf_token'] =
+        bin2hex(
+            random_bytes(32)
+        );
 }
 
-$csrfToken = (string) $_SESSION['csrf_token'];
+$csrfToken =
+    (string) $_SESSION['csrf_token'];
 
 
 /*
@@ -89,19 +103,21 @@ $csrfToken = (string) $_SESSION['csrf_token'];
 |--------------------------------------------------------------------------
 */
 
-$applicationId = filter_input(
-    INPUT_GET,
-    'id',
-    FILTER_VALIDATE_INT
-);
+$applicationId =
+    filter_input(
+        INPUT_GET,
+        'id',
+        FILTER_VALIDATE_INT
+    );
 
 if (!$applicationId) {
 
-    $applicationId = filter_input(
-        INPUT_POST,
-        'application_id',
-        FILTER_VALIDATE_INT
-    );
+    $applicationId =
+        filter_input(
+            INPUT_POST,
+            'application_id',
+            FILTER_VALIDATE_INT
+        );
 }
 
 if (!$applicationId) {
@@ -113,6 +129,9 @@ if (!$applicationId) {
     exit;
 }
 
+$applicationId =
+    (int) $applicationId;
+
 
 /*
 |--------------------------------------------------------------------------
@@ -120,46 +139,61 @@ if (!$applicationId) {
 |--------------------------------------------------------------------------
 */
 
-$statement = $connection->prepare(
-    "
-    SELECT
-        id,
-        application_reference,
-        pbo_name,
-        pbo_registration_number,
-        registration_type,
-        status,
-        current_step,
-        financial_year_start_month,
-        financial_year_end_month,
-        created_by
-    FROM pbo_applications
-    WHERE id = :application_id
-      AND created_by = :user_id
-    LIMIT 1
-    "
-);
+$statement =
+    $connection->prepare(
+        "
+        SELECT
+            id,
+            application_reference,
+            pbo_name,
+            pbo_registration_number,
+            registration_type,
+            status,
+            current_step,
+            financial_year_start_month,
+            financial_year_end_month,
+            created_by
+        FROM pbo_applications
+        WHERE id = :application_id
+          AND created_by = :user_id
+        LIMIT 1
+        "
+    );
 
 $statement->execute([
-    ':application_id' => $applicationId,
-    ':user_id' => $userId,
+
+    ':application_id'
+        => $applicationId,
+
+    ':user_id'
+        => $userId,
 ]);
 
-$application = $statement->fetch(PDO::FETCH_ASSOC);
+$application =
+    $statement->fetch(
+        PDO::FETCH_ASSOC
+    );
 
 if (!$application) {
+
     http_response_code(404);
-    exit('Application not found.');
+
+    exit(
+        'Application not found.'
+    );
 }
 
 
 /*
 |--------------------------------------------------------------------------
-| Prevent editing submitted applications
+| Submitted applications cannot be edited
 |--------------------------------------------------------------------------
 */
 
-if ($application['status'] !== 'draft') {
+if (
+    $application['status'] !==
+    'draft'
+) {
 
     header(
         'Location: /pbo-portal/applications/records.php'
@@ -171,41 +205,138 @@ if ($application['status'] !== 'draft') {
 
 /*
 |--------------------------------------------------------------------------
-| Months
+| Financial-year cycles
 |--------------------------------------------------------------------------
+|
+| Every option below represents exactly twelve consecutive months.
+|
+| Start month => end month
+|
 */
 
-$months = [
-    1  => 'January',
-    2  => 'February',
-    3  => 'March',
-    4  => 'April',
-    5  => 'May',
-    6  => 'June',
-    7  => 'July',
-    8  => 'August',
-    9  => 'September',
-    10 => 'October',
-    11 => 'November',
-    12 => 'December',
+$financialYearCycles = [
+
+    1 => [
+        'start' => 1,
+        'end' => 12,
+        'label' => 'January – December',
+    ],
+
+    2 => [
+        'start' => 2,
+        'end' => 1,
+        'label' => 'February – January',
+    ],
+
+    3 => [
+        'start' => 3,
+        'end' => 2,
+        'label' => 'March – February',
+    ],
+
+    4 => [
+        'start' => 4,
+        'end' => 3,
+        'label' => 'April – March',
+    ],
+
+    5 => [
+        'start' => 5,
+        'end' => 4,
+        'label' => 'May – April',
+    ],
+
+    6 => [
+        'start' => 6,
+        'end' => 5,
+        'label' => 'June – May',
+    ],
+
+    7 => [
+        'start' => 7,
+        'end' => 6,
+        'label' => 'July – June',
+    ],
+
+    8 => [
+        'start' => 8,
+        'end' => 7,
+        'label' => 'August – July',
+    ],
+
+    9 => [
+        'start' => 9,
+        'end' => 8,
+        'label' => 'September – August',
+    ],
+
+    10 => [
+        'start' => 10,
+        'end' => 9,
+        'label' => 'October – September',
+    ],
+
+    11 => [
+        'start' => 11,
+        'end' => 10,
+        'label' => 'November – October',
+    ],
+
+    12 => [
+        'start' => 12,
+        'end' => 11,
+        'label' => 'December – November',
+    ],
 ];
 
 
 /*
 |--------------------------------------------------------------------------
-| Existing values
+| Determine existing selection
 |--------------------------------------------------------------------------
 */
 
-$startMonth =
-    $application['financial_year_start_month'] !== null
-        ? (int) $application['financial_year_start_month']
+$selectedCycle = 0;
+
+$currentStartMonth =
+    $application[
+        'financial_year_start_month'
+    ] !== null
+        ? (int)
+          $application[
+              'financial_year_start_month'
+          ]
         : 0;
 
-$endMonth =
-    $application['financial_year_end_month'] !== null
-        ? (int) $application['financial_year_end_month']
+$currentEndMonth =
+    $application[
+        'financial_year_end_month'
+    ] !== null
+        ? (int)
+          $application[
+              'financial_year_end_month'
+          ]
         : 0;
+
+
+foreach (
+    $financialYearCycles
+    as $cycleNumber => $cycle
+) {
+
+    if (
+        $cycle['start'] ===
+            $currentStartMonth &&
+        $cycle['end'] ===
+            $currentEndMonth
+    ) {
+
+        $selectedCycle =
+            (int) $cycleNumber;
+
+        break;
+    }
+}
 
 
 /*
@@ -223,7 +354,46 @@ $errors = [];
 |--------------------------------------------------------------------------
 */
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if (
+    $_SERVER['REQUEST_METHOD'] ===
+    'POST'
+) {
+
+    /*
+    |--------------------------------------------------------------------------
+    | Submission action
+    |--------------------------------------------------------------------------
+    */
+
+    $formAction =
+        (string)
+        ($_POST['form_action'] ??
+            'save_continue');
+
+
+    $isWizardNavigation =
+        $formAction ===
+        'wizard_navigation';
+
+
+    $wizardDestination =
+        filter_input(
+            INPUT_POST,
+            'wizard_destination',
+            FILTER_VALIDATE_INT
+        );
+
+
+    if (
+        $wizardDestination === false ||
+        $wizardDestination === null ||
+        $wizardDestination < 1 ||
+        $wizardDestination > 6
+    ) {
+
+        $wizardDestination = 4;
+    }
+
 
     /*
     |--------------------------------------------------------------------------
@@ -232,12 +402,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     */
 
     $submittedToken =
-        (string) ($_POST['csrf_token'] ?? '');
+        (string)
+        ($_POST['csrf_token'] ?? '');
+
 
     if (
         $submittedToken === '' ||
-        !hash_equals($csrfToken, $submittedToken)
+        !hash_equals(
+            $csrfToken,
+            $submittedToken
+        )
     ) {
+
         $errors[] =
             'Your session token is invalid or has expired. Please reload the page and try again.';
     }
@@ -245,17 +421,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     /*
     |--------------------------------------------------------------------------
-    | Staff-entered months
+    | Selected financial-year cycle
     |--------------------------------------------------------------------------
     */
 
-    $startMonth = isset($_POST['financial_year_start_month'])
-        ? (int) $_POST['financial_year_start_month']
-        : 0;
-
-    $endMonth = isset($_POST['financial_year_end_month'])
-        ? (int) $_POST['financial_year_end_month']
-        : 0;
+    $selectedCycle =
+        isset(
+            $_POST[
+                'financial_year_cycle'
+            ]
+        )
+            ? (int)
+              $_POST[
+                  'financial_year_cycle'
+              ]
+            : 0;
 
 
     /*
@@ -263,22 +443,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     | Validation
     |--------------------------------------------------------------------------
     |
-    | Staff retain control over both values.
+    | Save & Continue requires a financial year.
     |
-    | We therefore verify only that valid months have been selected.
-    | We do NOT replace or reject the end month based on an automatic
-    | calculation.
+    | Wizard navigation may leave this page incomplete.
     |
     */
 
-    if (!isset($months[$startMonth])) {
+    if (
+        !$isWizardNavigation &&
+        !isset(
+            $financialYearCycles[
+                $selectedCycle
+            ]
+        )
+    ) {
+
         $errors[] =
-            'Please select the start month of the financial year.';
+            'Please select a valid financial year.';
     }
 
-    if (!isset($months[$endMonth])) {
+
+    /*
+    |--------------------------------------------------------------------------
+    | Reject manipulated cycle values
+    |--------------------------------------------------------------------------
+    |
+    | A non-zero selection must always correspond to one of our approved
+    | twelve-month financial-year cycles.
+    |
+    */
+
+    if (
+        $selectedCycle !== 0 &&
+        !isset(
+            $financialYearCycles[
+                $selectedCycle
+            ]
+        )
+    ) {
+
         $errors[] =
-            'Please select the end month of the financial year.';
+            'The selected financial year is invalid.';
     }
 
 
@@ -297,34 +502,98 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             /*
             |--------------------------------------------------------------------------
+            | Determine start/end months
+            |--------------------------------------------------------------------------
+            */
+
+            $startMonth = null;
+            $endMonth = null;
+            $cycleLabel =
+                'Not yet selected';
+
+
+            if (
+                isset(
+                    $financialYearCycles[
+                        $selectedCycle
+                    ]
+                )
+            ) {
+
+                $selectedFinancialYear =
+                    $financialYearCycles[
+                        $selectedCycle
+                    ];
+
+
+                $startMonth =
+                    (int)
+                    $selectedFinancialYear[
+                        'start'
+                    ];
+
+
+                $endMonth =
+                    (int)
+                    $selectedFinancialYear[
+                        'end'
+                    ];
+
+
+                $cycleLabel =
+                    (string)
+                    $selectedFinancialYear[
+                        'label'
+                    ];
+            }
+
+
+            /*
+            |--------------------------------------------------------------------------
             | Update application
             |--------------------------------------------------------------------------
             */
 
-            $statement = $connection->prepare(
-                "
-                UPDATE pbo_applications
-                SET
-                    financial_year_start_month = :start_month,
-                    financial_year_end_month = :end_month,
+            $statement =
+                $connection->prepare(
+                    "
+                    UPDATE pbo_applications
+                    SET
+                        financial_year_start_month =
+                            :start_month,
 
-                    current_step =
-                        CASE
-                            WHEN current_step < 5 THEN 5
-                            ELSE current_step
-                        END,
+                        financial_year_end_month =
+                            :end_month,
 
-                    updated_by = :updated_by
+                        current_step =
+                            CASE
+                                WHEN current_step < 5
+                                    THEN 5
+                                ELSE current_step
+                            END,
 
-                WHERE id = :application_id
-                "
-            );
+                        updated_by =
+                            :updated_by
+
+                    WHERE id =
+                        :application_id
+                    "
+                );
+
 
             $statement->execute([
-                ':start_month' => $startMonth,
-                ':end_month' => $endMonth,
-                ':updated_by' => $userId,
-                ':application_id' => $applicationId,
+
+                ':start_month'
+                    => $startMonth,
+
+                ':end_month'
+                    => $endMonth,
+
+                ':updated_by'
+                    => $userId,
+
+                ':application_id'
+                    => $applicationId,
             ]);
 
 
@@ -334,34 +603,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             |--------------------------------------------------------------------------
             */
 
-            $statement = $connection->prepare(
-                "
-                INSERT INTO application_audit_log
-                (
-                    application_id,
-                    user_id,
-                    action,
-                    description
-                )
-                VALUES
-                (
-                    :application_id,
-                    :user_id,
-                    'FINANCIAL_YEAR_SAVED',
-                    :description
-                )
-                "
-            );
+            $statement =
+                $connection->prepare(
+                    "
+                    INSERT INTO application_audit_log
+                    (
+                        application_id,
+                        user_id,
+                        action,
+                        description
+                    )
+                    VALUES
+                    (
+                        :application_id,
+                        :user_id,
+                        'FINANCIAL_YEAR_SAVED',
+                        :description
+                    )
+                    "
+                );
+
+
+            $auditDescription =
+                $selectedCycle !== 0
+                    ? 'Financial year recorded as ' .
+                      $cycleLabel .
+                      '.'
+                    : 'Financial year section saved as an incomplete draft.';
+
 
             $statement->execute([
-                ':application_id' => $applicationId,
-                ':user_id' => $userId,
-                ':description' =>
-                    'Financial year recorded as ' .
-                    $months[$startMonth] .
-                    ' to ' .
-                    $months[$endMonth] .
-                    '.',
+
+                ':application_id'
+                    => $applicationId,
+
+                ':user_id'
+                    => $userId,
+
+                ':description'
+                    => $auditDescription,
             ]);
 
 
@@ -370,27 +650,81 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             /*
             |--------------------------------------------------------------------------
-            | Continue to officials
+            | Wizard destination
+            |--------------------------------------------------------------------------
+            */
+
+            if ($isWizardNavigation) {
+
+                $wizardPages = [
+
+                    1 => 'create.php',
+
+                    2 => 'objectives.php',
+
+                    3 => 'beneficiaries.php',
+
+                    4 => 'financial-year.php',
+
+                    5 => 'officials.php',
+
+                    6 => 'review.php',
+                ];
+
+
+                $destinationPage =
+                    $wizardPages[
+                        $wizardDestination
+                    ] ??
+                    'financial-year.php';
+
+
+                header(
+                    'Location: /pbo-portal/applications/' .
+                    $destinationPage .
+                    '?id=' .
+                    urlencode(
+                        (string)
+                        $applicationId
+                    )
+                );
+
+                exit;
+            }
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Normal Save & Continue
             |--------------------------------------------------------------------------
             */
 
             header(
                 'Location: /pbo-portal/applications/officials.php?id=' .
-                urlencode((string) $applicationId)
+                urlencode(
+                    (string)
+                    $applicationId
+                )
             );
 
             exit;
 
+
         } catch (Throwable $exception) {
 
-            if ($connection->inTransaction()) {
+            if (
+                $connection->inTransaction()
+            ) {
+
                 $connection->rollBack();
             }
+
 
             error_log(
                 'Saving financial year failed: ' .
                 $exception->getMessage()
             );
+
 
             $errors[] =
                 'The financial year could not be saved. No changes were committed.';
@@ -405,7 +739,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 |--------------------------------------------------------------------------
 */
 
-require_once __DIR__ . '/../includes/header.php';
+require_once __DIR__ .
+    '/../includes/header.php';
 
 ?>
 
@@ -430,8 +765,8 @@ require_once __DIR__ . '/../includes/header.php';
             </h1>
 
             <p class="subtitle">
-                Step 4 of 6 — Enter the start and end of the
-                organization's financial year.
+                Step 4 of 6 — Select the organization's
+                twelve-month financial year.
             </p>
 
         </div>
@@ -446,10 +781,20 @@ require_once __DIR__ . '/../includes/header.php';
     <div class="admin-info">
 
         <strong>
-            <?= e((string) $application['pbo_name']) ?>
+            <?= e(
+                (string)
+                $application['pbo_name']
+            ) ?>
         </strong>
 
-        <?php if (!empty($application['application_reference'])): ?>
+
+        <?php if (
+            !empty(
+                $application[
+                    'application_reference'
+                ]
+            )
+        ): ?>
 
             &nbsp;&mdash;&nbsp;
 
@@ -458,7 +803,9 @@ require_once __DIR__ . '/../includes/header.php';
             <strong>
                 <?= e(
                     (string)
-                    $application['application_reference']
+                    $application[
+                        'application_reference'
+                    ]
                 ) ?>
             </strong>
 
@@ -467,73 +814,14 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
 
 
-    <!-- ==========================================================
-         PROGRESS
-         ========================================================== -->
+    <?php
 
-    <div
-        style="
-            margin-bottom: 22px;
-            padding: 16px 18px;
-            background: #ffffff;
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            box-shadow: var(--shadow-sm);
-        "
-    >
+    $wizardCurrentStep = 4;
 
-        <div
-            style="
-                display: flex;
-                justify-content: space-between;
-                gap: 10px;
-                margin-bottom: 10px;
-                color: var(--text-secondary);
-                font-size: 11px;
-                font-weight: 700;
-            "
-        >
+    require __DIR__ .
+        '/../includes/application-wizard.php';
 
-            <span>1. Organization</span>
-            <span>2. Objectives</span>
-            <span>3. Beneficiaries</span>
-
-            <span style="color: var(--blue);">
-                4. Financial Year
-            </span>
-
-            <span>5. Officials</span>
-            <span>6. Review</span>
-
-        </div>
-
-
-        <div
-            style="
-                width: 100%;
-                height: 7px;
-                overflow: hidden;
-                background: #e9edf1;
-                border-radius: 20px;
-            "
-        >
-
-            <div
-                style="
-                    width: 66.6667%;
-                    height: 100%;
-                    background:
-                        linear-gradient(
-                            90deg,
-                            var(--blue),
-                            var(--blue-medium)
-                        );
-                "
-            ></div>
-
-        </div>
-
-    </div>
+    ?>
 
 
     <!-- ==========================================================
@@ -548,9 +836,16 @@ require_once __DIR__ . '/../includes/header.php';
                 Please correct the following:
             </strong>
 
-            <ul style="margin: 8px 0 0; padding-left: 20px;">
+            <ul
+                style="
+                    margin: 8px 0 0;
+                    padding-left: 20px;
+                "
+            >
 
-                <?php foreach ($errors as $error): ?>
+                <?php foreach (
+                    $errors as $error
+                ): ?>
 
                     <li>
                         <?= e($error) ?>
@@ -574,6 +869,7 @@ require_once __DIR__ . '/../includes/header.php';
         action=""
         class="application-form"
         id="financial-year-form"
+        novalidate
     >
 
         <input
@@ -586,6 +882,20 @@ require_once __DIR__ . '/../includes/header.php';
             type="hidden"
             name="application_id"
             value="<?= (int) $applicationId ?>"
+        >
+
+        <input
+            type="hidden"
+            name="form_action"
+            id="form_action"
+            value="save_continue"
+        >
+
+        <input
+            type="hidden"
+            name="wizard_destination"
+            id="wizard_destination"
+            value=""
         >
 
 
@@ -604,8 +914,8 @@ require_once __DIR__ . '/../includes/header.php';
                     </h2>
 
                     <p>
-                        Indicate the start and end of the organization's
-                        financial year.
+                        Select the organization's approved
+                        twelve-month financial year.
                     </p>
 
                 </div>
@@ -615,277 +925,74 @@ require_once __DIR__ . '/../includes/header.php';
 
             <div class="admin-info">
 
-                Select the appropriate start and end months.
+                Select one financial-year period.
 
-                Typical financial years may run from
-                <strong>January to December</strong>,
-                <strong>February to January</strong>, or
-                <strong>March to February</strong>.
-
-        
+                Each available option covers exactly
+                <strong>12 consecutive months</strong>.
 
             </div>
 
 
-            <!-- ==================================================
-                 CALENDAR-LIKE MONTH SELECTION
-                 ================================================== -->
+            <div class="form-group">
 
-            <div
-                style="
-                    display: grid;
-                    grid-template-columns:
-                        repeat(auto-fit, minmax(310px, 1fr));
-                    gap: 22px;
-                "
-            >
+                <label for="financial_year_cycle">
 
+                    Financial Year
 
-                <!-- ==============================================
-                     START MONTH
-                     ============================================== -->
-
-                <div
-                    style="
-                        padding: 20px;
-                        background: var(--soft-bg);
-                        border: 1px solid var(--border);
-                        border-radius: var(--radius);
-                    "
-                >
-
-                    <span class="section-eyebrow">
-                        Financial Year
+                    <span class="required">
+                        *
                     </span>
 
-                    <h3
-                        style="
-                            margin: 0 0 5px;
-                            color: var(--blue-dark);
-                        "
-                    >
-                        Start Month
-                    </h3>
-
-                    <p
-                        style="
-                            margin: 0 0 17px;
-                            color: var(--text-secondary);
-                            font-size: 12px;
-                        "
-                    >
-                        Select the month in which the financial year begins.
-                    </p>
+                </label>
 
 
-                    <div
-                        id="start-month-calendar"
-                        style="
-                            display: grid;
-                            grid-template-columns:
-                                repeat(3, minmax(0, 1fr));
-                            gap: 8px;
-                        "
-                    >
-
-                        <?php foreach ($months as $number => $name): ?>
-
-                            <label
-                                class="radio-option"
-                                style="
-                                    justify-content: center;
-                                    text-align: center;
-                                "
-                            >
-
-                                <input
-                                    type="radio"
-                                    name="financial_year_start_month"
-                                    value="<?= $number ?>"
-                                    <?= $startMonth === $number
-                                        ? 'checked'
-                                        : '' ?>
-                                    required
-                                >
-
-                                <span>
-                                    <?= e(
-                                        substr($name, 0, 3)
-                                    ) ?>
-                                </span>
-
-                            </label>
-
-                        <?php endforeach; ?>
-
-                    </div>
-
-                </div>
-
-
-                <!-- ==============================================
-                     END MONTH
-                     ============================================== -->
-
-                <div
-                    style="
-                        padding: 20px;
-                        background: var(--soft-bg);
-                        border: 1px solid var(--border);
-                        border-radius: var(--radius);
-                    "
+                <select
+                    id="financial_year_cycle"
+                    name="financial_year_cycle"
+                    required
                 >
 
-                    <span class="section-eyebrow">
-                        Financial Year
-                    </span>
-
-                    <h3
-                        style="
-                            margin: 0 0 5px;
-                            color: var(--blue-dark);
-                        "
-                    >
-                        End Month
-                    </h3>
-
-                    <p
-                        style="
-                            margin: 0 0 17px;
-                            color: var(--text-secondary);
-                            font-size: 12px;
-                        "
-                    >
-                        Select the month in which the financial year ends.
-                    </p>
+                    <option value="">
+                        Select Financial Year
+                    </option>
 
 
-                    <div
-                        id="end-month-calendar"
-                        style="
-                            display: grid;
-                            grid-template-columns:
-                                repeat(3, minmax(0, 1fr));
-                            gap: 8px;
-                        "
-                    >
+                    <?php foreach (
+                        $financialYearCycles
+                        as $cycleNumber => $cycle
+                    ): ?>
 
-                        <?php foreach ($months as $number => $name): ?>
+                        <option
+                            value="<?= (int) $cycleNumber ?>"
+                            <?= $selectedCycle ===
+                                (int) $cycleNumber
+                                    ? 'selected'
+                                    : '' ?>
+                        >
+                            <?= e(
+                                (string)
+                                $cycle['label']
+                            ) ?>
+                        </option>
 
-                            <label
-                                class="radio-option"
-                                style="
-                                    justify-content: center;
-                                    text-align: center;
-                                "
-                            >
+                    <?php endforeach; ?>
 
-                                <input
-                                    type="radio"
-                                    name="financial_year_end_month"
-                                    value="<?= $number ?>"
-                                    <?= $endMonth === $number
-                                        ? 'checked'
-                                        : '' ?>
-                                    required
-                                >
-
-                                <span>
-                                    <?= e(
-                                        substr($name, 0, 3)
-                                    ) ?>
-                                </span>
-
-                            </label>
-
-                        <?php endforeach; ?>
-
-                    </div>
-
-                </div>
-
-            </div>
+                </select>
 
 
-            <!-- ==================================================
-                 SUGGESTION
-                 ================================================== -->
+                <span class="form-help">
 
-            <div
-                id="financial-year-suggestion"
-                style="
-                    display: none;
-                    margin-top: 20px;
-                    padding: 15px 17px;
-                    background: var(--gold-light);
-                    border: 1px solid #ead9a8;
-                    border-left: 4px solid var(--gold);
-                    border-radius: var(--radius);
-                "
-            >
+                    Example:
+                    January – December,
+                    March – February,
+                    or July – June.
 
-                <span
-                    style="
-                        display: block;
-                        margin-bottom: 4px;
-                        color: var(--gold-dark);
-                        font-size: 10px;
-                        font-weight: 800;
-                        letter-spacing: .6px;
-                        text-transform: uppercase;
-                    "
-                >
-                    Suggested End Month
                 </span>
 
-                <div
-                    style="
-                        display: flex;
-                        align-items: center;
-                        justify-content: space-between;
-                        flex-wrap: wrap;
-                        gap: 12px;
-                    "
-                >
-
-                    <div>
-
-                        <strong
-                            id="suggestion-text"
-                            style="
-                                color: var(--heading);
-                            "
-                        ></strong>
-
-                        <div
-                            style="
-                                margin-top: 3px;
-                                color: var(--text-secondary);
-                                font-size: 11px;
-                            "
-                        >
-                            This suggestion is optional. 
-                        </div>
-
-                    </div>
-
-
-                    <button
-                        type="button"
-                        class="btn btn-gold btn-sm"
-                        id="use-suggested-end"
-                    >
-                        Use Suggested Month
-                    </button>
-
-                </div>
-
             </div>
 
 
-            <!-- ==================================================
-                 SELECTED PERIOD
-                 ================================================== -->
+            <!-- Selected period preview -->
 
             <div
                 id="financial-year-preview"
@@ -923,7 +1030,7 @@ require_once __DIR__ . '/../includes/header.php';
                     id="financial-year-preview-text"
                     style="
                         color: var(--blue-dark);
-                        font-size: 18px;
+                        font-size: 20px;
                     "
                 ></strong>
 
@@ -942,7 +1049,8 @@ require_once __DIR__ . '/../includes/header.php';
 
                 <a
                     href="/pbo-portal/applications/beneficiaries.php?id=<?= urlencode(
-                        (string) $applicationId
+                        (string)
+                        $applicationId
                     ) ?>"
                     class="btn btn-secondary"
                 >
@@ -963,6 +1071,7 @@ require_once __DIR__ . '/../includes/header.php';
                     Step 4 of 6
                 </span>
 
+
                 <button
                     type="submit"
                     class="btn btn-primary"
@@ -971,7 +1080,8 @@ require_once __DIR__ . '/../includes/header.php';
 
                     <span aria-hidden="true">
                         &rarr;
-                    </span>
+                                            </span>
+
                 </button>
 
             </div>
@@ -1004,42 +1114,15 @@ require_once __DIR__ . '/../includes/header.php';
             'financial-year-form'
         );
 
-
-    const startInputs =
-        document.querySelectorAll(
-            'input[name="financial_year_start_month"]'
-        );
-
-
-    const endInputs =
-        document.querySelectorAll(
-            'input[name="financial_year_end_month"]'
-        );
-
-
-    const suggestionBox =
+    const financialYearSelect =
         document.getElementById(
-            'financial-year-suggestion'
+            'financial_year_cycle'
         );
-
-
-    const suggestionText =
-        document.getElementById(
-            'suggestion-text'
-        );
-
-
-    const useSuggestedButton =
-        document.getElementById(
-            'use-suggested-end'
-        );
-
 
     const preview =
         document.getElementById(
             'financial-year-preview'
         );
-
 
     const previewText =
         document.getElementById(
@@ -1049,201 +1132,64 @@ require_once __DIR__ . '/../includes/header.php';
 
     /*
     |--------------------------------------------------------------------------
-    | Month names
+    | Financial-year labels
     |--------------------------------------------------------------------------
     */
 
-    const months = {
+    const financialYearLabels = {
 
-        1: 'January',
-        2: 'February',
-        3: 'March',
-        4: 'April',
-        5: 'May',
-        6: 'June',
-        7: 'July',
-        8: 'August',
-        9: 'September',
-        10: 'October',
-        11: 'November',
-        12: 'December'
+        1: 'January – December',
 
+        2: 'February – January',
+
+        3: 'March – February',
+
+        4: 'April – March',
+
+        5: 'May – April',
+
+        6: 'June – May',
+
+        7: 'July – June',
+
+        8: 'August – July',
+
+        9: 'September – August',
+
+        10: 'October – September',
+
+        11: 'November – October',
+
+        12: 'December – November'
     };
 
 
     /*
     |--------------------------------------------------------------------------
-    | Suggested end month
-    |--------------------------------------------------------------------------
-    |
-    | This is only a suggestion.
-    |
-    | Staff remain free to select ANY end month.
-    |
-    */
-
-    let suggestedEndMonth = 0;
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Get selected month
-    |--------------------------------------------------------------------------
-    */
-
-    function getSelectedMonth(inputs) {
-
-        for (const input of inputs) {
-
-            if (input.checked) {
-
-                return parseInt(
-                    input.value,
-                    10
-                );
-
-            }
-
-        }
-
-        return 0;
-
-    }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Select end month programmatically
-    |--------------------------------------------------------------------------
-    */
-
-    function selectEndMonth(monthNumber) {
-
-        endInputs.forEach(
-            function (input) {
-
-                input.checked =
-                    parseInt(
-                        input.value,
-                        10
-                    ) === monthNumber;
-
-            }
-        );
-
-
-        updatePreview();
-
-    }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Update suggested month
-    |--------------------------------------------------------------------------
-    */
-
-    function updateSuggestion() {
-
-        const startMonth =
-            getSelectedMonth(startInputs);
-
-
-        if (
-            !startMonth ||
-            !months[startMonth]
-        ) {
-
-            suggestedEndMonth = 0;
-
-            suggestionBox.style.display =
-                'none';
-
-            suggestionText.textContent =
-                '';
-
-            return;
-
-        }
-
-
-        /*
-        | Conventional 12-month suggestion:
-        |
-        | January  -> December
-        | February -> January
-        | March    -> February
-        | ...
-        | December -> November
-        */
-
-        suggestedEndMonth =
-            startMonth === 1
-                ? 12
-                : startMonth - 1;
-
-
-        suggestionText.textContent =
-            months[startMonth] +
-            ' normally corresponds to an end month of ' +
-            months[suggestedEndMonth] +
-            '.';
-
-
-        /*
-        | Do not show the suggestion when staff have
-        | already selected the suggested end month.
-        */
-
-        const selectedEnd =
-            getSelectedMonth(endInputs);
-
-
-        if (
-            selectedEnd === suggestedEndMonth
-        ) {
-
-            suggestionBox.style.display =
-                'none';
-
-        } else {
-
-            suggestionBox.style.display =
-                '';
-
-        }
-
-    }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Update selected financial year preview
+    | Update preview
     |--------------------------------------------------------------------------
     */
 
     function updatePreview() {
 
-        const startMonth =
-            getSelectedMonth(startInputs);
-
-
-        const endMonth =
-            getSelectedMonth(endInputs);
+        const selectedCycle =
+            parseInt(
+                financialYearSelect.value,
+                10
+            );
 
 
         if (
-            startMonth &&
-            endMonth &&
-            months[startMonth] &&
-            months[endMonth]
+            selectedCycle &&
+            financialYearLabels[
+                selectedCycle
+            ]
         ) {
 
             previewText.textContent =
-                months[startMonth] +
-                ' to ' +
-                months[endMonth];
-
+                financialYearLabels[
+                    selectedCycle
+                ];
 
             preview.style.display =
                 '';
@@ -1255,118 +1201,34 @@ require_once __DIR__ . '/../includes/header.php';
 
             preview.style.display =
                 'none';
-
         }
-
-
-        /*
-        | Refresh suggestion because staff may have
-        | manually selected the suggested end month.
-        */
-
-        updateSuggestion();
-
     }
 
 
     /*
     |--------------------------------------------------------------------------
-    | Start month listeners
+    | Financial-year change
     |--------------------------------------------------------------------------
-    |
-    | IMPORTANT:
-    |
-    | Selecting the start month DOES NOT automatically
-    | change the end month.
-    |
     */
 
-    startInputs.forEach(
-        function (input) {
-
-            input.addEventListener(
-                'change',
-                function () {
-
-                    updateSuggestion();
-
-                    updatePreview();
-
-                }
-            );
-
-        }
+    financialYearSelect.addEventListener(
+        'change',
+        updatePreview
     );
 
 
     /*
     |--------------------------------------------------------------------------
-    | End month listeners
-    |--------------------------------------------------------------------------
-    |
-    | Staff have full control over the end month.
-    |
-    */
-
-    endInputs.forEach(
-        function (input) {
-
-            input.addEventListener(
-                'change',
-                function () {
-
-                    updatePreview();
-
-                }
-            );
-
-        }
-    );
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Use suggested end month
-    |--------------------------------------------------------------------------
-    |
-    | The suggestion is applied ONLY when staff explicitly
-    | press this button.
-    |
-    */
-
-    useSuggestedButton.addEventListener(
-        'click',
-        function () {
-
-            if (
-                suggestedEndMonth &&
-                months[suggestedEndMonth]
-            ) {
-
-                selectEndMonth(
-                    suggestedEndMonth
-                );
-
-            }
-
-        }
-    );
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Initial state
+    | Initial preview
     |--------------------------------------------------------------------------
     */
-
-    updateSuggestion();
 
     updatePreview();
 
 
     /*
     |--------------------------------------------------------------------------
-    | Submit
+    | Normal Save & Continue
     |--------------------------------------------------------------------------
     */
 
@@ -1374,38 +1236,49 @@ require_once __DIR__ . '/../includes/header.php';
         'submit',
         function (event) {
 
-
             /*
-            | Both month selections are required.
+            |--------------------------------------------------------------------------
+            | Wizard navigation uses its own partial-save pathway.
+            |--------------------------------------------------------------------------
             */
 
-            const startMonth =
-                getSelectedMonth(startInputs);
-
-
-            const endMonth =
-                getSelectedMonth(endInputs);
+            const formAction =
+                document.getElementById(
+                    'form_action'
+                );
 
 
             if (
-                !startMonth ||
-                !endMonth
+                formAction &&
+                formAction.value ===
+                    'wizard_navigation'
             ) {
 
-                event.preventDefault();
-
-                alert(
-                    'Please select both the start and end of the financial year.'
-                );
-
                 return;
-
             }
 
 
             /*
-            | Browser validation.
+            |--------------------------------------------------------------------------
+            | A valid financial year is mandatory for Save & Continue.
+            |--------------------------------------------------------------------------
             */
+
+            if (
+                financialYearSelect.value === ''
+            ) {
+
+                event.preventDefault();
+
+                financialYearSelect.focus();
+
+                alert(
+                    'Please select a valid financial year.'
+                );
+
+                return;
+            }
+
 
             if (!form.checkValidity()) {
 
@@ -1414,25 +1287,13 @@ require_once __DIR__ . '/../includes/header.php';
                 form.reportValidity();
 
                 return;
-
             }
 
 
             /*
             |--------------------------------------------------------------------------
-            | IMPORTANT
+            | Prevent accidental double submission
             |--------------------------------------------------------------------------
-            |
-            | There is deliberately NO JavaScript rule requiring
-            | the selected end month to equal the suggested month.
-            |
-            | Staff-entered values are authoritative.
-            |
-            */
-
-
-            /*
-            | Prevent accidental double submission.
             */
 
             const submitButton =
@@ -1443,13 +1304,105 @@ require_once __DIR__ . '/../includes/header.php';
 
             if (submitButton) {
 
-                submitButton.disabled = true;
+                submitButton.disabled =
+                    true;
 
                 submitButton.innerHTML =
                     'Saving...';
-
             }
+        }
+    );
 
+
+    /*
+    |--------------------------------------------------------------------------
+    | Wizard navigation
+    |--------------------------------------------------------------------------
+    |
+    | Clicking another wizard step saves the Financial Year selection
+    | before navigating.
+    |
+    */
+
+    const wizardLinks =
+        document.querySelectorAll(
+            '[data-wizard-link="true"]'
+        );
+
+
+    wizardLinks.forEach(
+        function (link) {
+
+            link.addEventListener(
+                'click',
+                function (event) {
+
+                    const destination =
+                        this.getAttribute(
+                            'data-wizard-step'
+                        );
+
+
+                    /*
+                    |--------------------------------------------------------------------------
+                    | Financial Year is already the current page.
+                    |--------------------------------------------------------------------------
+                    */
+
+                    if (destination === '4') {
+
+                        return;
+                    }
+
+
+                    event.preventDefault();
+
+
+                    const formAction =
+                        document.getElementById(
+                            'form_action'
+                        );
+
+                    const wizardDestination =
+                        document.getElementById(
+                            'wizard_destination'
+                        );
+
+
+                    if (
+                        !formAction ||
+                        !wizardDestination
+                    ) {
+
+                        return;
+                    }
+
+
+                    formAction.value =
+                        'wizard_navigation';
+
+                    wizardDestination.value =
+                        destination;
+
+
+                    /*
+                    |--------------------------------------------------------------------------
+                    | Wizard navigation may preserve an incomplete section.
+                    |--------------------------------------------------------------------------
+                    */
+
+                    form.noValidate = true;
+
+
+                    /*
+                    |--------------------------------------------------------------------------
+                    | Save draft and let PHP redirect to requested wizard page.
+                    |--------------------------------------------------------------------------
+                    */
+
+                    form.submit();
+                }
+            );
         }
     );
 
@@ -1465,6 +1418,7 @@ require_once __DIR__ . '/../includes/header.php';
 |--------------------------------------------------------------------------
 */
 
-require_once __DIR__ . '/../includes/footer.php';
+require_once __DIR__ .
+    '/../includes/footer.php';
 
 ?>

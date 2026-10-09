@@ -21,7 +21,7 @@ $activePage = 'applications';
 
 /*
 |--------------------------------------------------------------------------
-| Database connection
+| Database
 |--------------------------------------------------------------------------
 */
 
@@ -79,7 +79,6 @@ function cleanString(mixed $value): string
 function emptyOfficial(string $designation): array
 {
     return [
-        'id' => null,
         'designation' => $designation,
         'full_name' => '',
         'nationality' => '',
@@ -97,15 +96,43 @@ function officialLabel(string $designation): string
 {
     return match (strtoupper($designation)) {
         'CHAIRPERSON' => 'Chairperson',
-        'TREASURER'   => 'Treasurer',
-        'SECRETARY'   => 'Secretary',
-        'DIRECTOR'    => 'Director',
-        default       => ucwords(
+        'TREASURER' => 'Treasurer',
+        'SECRETARY' => 'Secretary',
+        'DIRECTOR' => 'Director',
+        default => ucwords(
             strtolower(
                 str_replace('_', ' ', $designation)
             )
         ),
     };
+}
+
+
+function directorHasData(array $record): bool
+{
+    foreach (
+        [
+            'full_name',
+            'nationality',
+            'id_passport_number',
+            'kra_pin',
+            'phone_number',
+            'email',
+            'existing_signature',
+            'signature',
+        ]
+        as $field
+    ) {
+        if (
+            trim(
+                (string) ($record[$field] ?? '')
+            ) !== ''
+        ) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 
@@ -130,18 +157,20 @@ $csrfToken =
 |--------------------------------------------------------------------------
 */
 
-$applicationId = filter_input(
-    INPUT_GET,
-    'id',
-    FILTER_VALIDATE_INT
-);
-
-if (!$applicationId) {
-    $applicationId = filter_input(
-        INPUT_POST,
-        'application_id',
+$applicationId =
+    filter_input(
+        INPUT_GET,
+        'id',
         FILTER_VALIDATE_INT
     );
+
+if (!$applicationId) {
+    $applicationId =
+        filter_input(
+            INPUT_POST,
+            'application_id',
+            FILTER_VALIDATE_INT
+        );
 }
 
 if (!$applicationId) {
@@ -151,6 +180,8 @@ if (!$applicationId) {
     exit;
 }
 
+$applicationId = (int) $applicationId;
+
 
 /*
 |--------------------------------------------------------------------------
@@ -158,23 +189,24 @@ if (!$applicationId) {
 |--------------------------------------------------------------------------
 */
 
-$statement = $connection->prepare(
-    "
-    SELECT
-        id,
-        application_reference,
-        pbo_name,
-        pbo_registration_number,
-        registration_type,
-        status,
-        current_step,
-        created_by
-    FROM pbo_applications
-    WHERE id = :application_id
-      AND created_by = :user_id
-    LIMIT 1
-    "
-);
+$statement =
+    $connection->prepare(
+        "
+        SELECT
+            id,
+            application_reference,
+            pbo_name,
+            pbo_registration_number,
+            registration_type,
+            status,
+            current_step,
+            created_by
+        FROM pbo_applications
+        WHERE id = :application_id
+          AND created_by = :user_id
+        LIMIT 1
+        "
+    );
 
 $statement->execute([
     ':application_id' => $applicationId,
@@ -202,19 +234,8 @@ if ($application['status'] !== 'draft') {
 | Signature storage
 |--------------------------------------------------------------------------
 |
-| Filesystem:
+| Signatures are OPTIONAL.
 |
-| /var/www/html/pbo-portal/
-|     uploads/
-|         applications/
-|             {application_id}/
-|                 signatures/
-|
-| Database stores a web-relative path:
-|
-| /pbo-portal/uploads/applications/{id}/signatures/file.png
-|
-|--------------------------------------------------------------------------
 */
 
 $uploadDirectory =
@@ -232,74 +253,56 @@ $maximumUploadSize =
     5 * 1024 * 1024;
 
 $allowedMimeTypes = [
-    'image/jpeg'      => 'jpg',
-    'image/png'       => 'png',
-    'image/webp'      => 'webp',
+    'image/jpeg' => 'jpg',
+    'image/png' => 'png',
+    'image/webp' => 'webp',
     'application/pdf' => 'pdf',
 ];
 
+$directoryError = null;
+
 
 /*
 |--------------------------------------------------------------------------
-| Create signature directory immediately
+| Prepare signature directory
 |--------------------------------------------------------------------------
 |
-| Do this when the page loads rather than waiting until POST.
+| A directory problem does NOT stop officials being saved because signatures
+| are optional. It matters only when a user actually uploads a signature.
 |
 */
-
-$directoryError = null;
 
 if (!is_dir($uploadDirectory)) {
 
-    $created = @mkdir(
-        $uploadDirectory,
-        0775,
-        true
-    );
-
-    if (!$created && !is_dir($uploadDirectory)) {
-
-        $lastError = error_get_last();
-
-        $directoryError =
-            'The signature storage directory could not be created.';
-
-        error_log(
-            'Signature directory creation failed: ' .
-            $uploadDirectory .
-            ' | ' .
-            ($lastError['message'] ?? 'Unknown filesystem error')
+    $created =
+        @mkdir(
+            $uploadDirectory,
+            0775,
+            true
         );
+
+    if (
+        !$created &&
+        !is_dir($uploadDirectory)
+    ) {
+        $directoryError =
+            'Signature storage is currently unavailable.';
     }
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| Ensure directory permissions are usable
-|--------------------------------------------------------------------------
-*/
 
 if (
     $directoryError === null &&
     is_dir($uploadDirectory) &&
     !is_writable($uploadDirectory)
 ) {
-
     $directoryError =
-        'The signature storage directory is not writable.';
-
-    error_log(
-        'Signature directory is not writable: ' .
-        $uploadDirectory
-    );
+        'Signature storage is currently unavailable.';
 }
 
 
 /*
 |--------------------------------------------------------------------------
-| Load existing officials
+| Initial officials
 |--------------------------------------------------------------------------
 */
 
@@ -315,31 +318,38 @@ $secretary =
 $directors = [];
 
 
-$statement = $connection->prepare(
-    "
-    SELECT
-        id,
-        full_name,
-        designation,
-        nationality,
-        id_passport_number,
-        kra_pin,
-        phone_number,
-        email,
-        signature
-    FROM application_officials
-    WHERE application_id = :application_id
-    ORDER BY
-        CASE designation
-            WHEN 'CHAIRPERSON' THEN 1
-            WHEN 'TREASURER' THEN 2
-            WHEN 'SECRETARY' THEN 3
-            WHEN 'DIRECTOR' THEN 4
-            ELSE 5
-        END,
-        id ASC
-    "
-);
+/*
+|--------------------------------------------------------------------------
+| Load saved officials
+|--------------------------------------------------------------------------
+*/
+
+$statement =
+    $connection->prepare(
+        "
+        SELECT
+            id,
+            full_name,
+            designation,
+            nationality,
+            id_passport_number,
+            kra_pin,
+            phone_number,
+            email,
+            signature
+        FROM application_officials
+        WHERE application_id = :application_id
+        ORDER BY
+            CASE designation
+                WHEN 'CHAIRPERSON' THEN 1
+                WHEN 'TREASURER' THEN 2
+                WHEN 'SECRETARY' THEN 3
+                WHEN 'DIRECTOR' THEN 4
+                ELSE 5
+            END,
+            id ASC
+        "
+    );
 
 $statement->execute([
     ':application_id' => $applicationId,
@@ -359,37 +369,24 @@ foreach ($savedOfficials as $saved) {
         );
 
     $record = [
-        'id' =>
-            (int) $saved['id'],
-
-        'designation' =>
-            $designation,
-
+        'designation' => $designation,
         'full_name' =>
-            (string) $saved['full_name'],
-
+            (string) ($saved['full_name'] ?? ''),
         'nationality' =>
             (string) ($saved['nationality'] ?? ''),
-
         'id_passport_number' =>
             (string) ($saved['id_passport_number'] ?? ''),
-
         'kra_pin' =>
             (string) ($saved['kra_pin'] ?? ''),
-
         'phone_number' =>
             (string) ($saved['phone_number'] ?? ''),
-
         'email' =>
             (string) ($saved['email'] ?? ''),
-
         'signature' =>
             (string) ($saved['signature'] ?? ''),
-
         'existing_signature' =>
             (string) ($saved['signature'] ?? ''),
     ];
-
 
     switch ($designation) {
 
@@ -414,36 +411,49 @@ foreach ($savedOfficials as $saved) {
 
 /*
 |--------------------------------------------------------------------------
-| Minimum two Director cards
-|--------------------------------------------------------------------------
-*/
-
-while (count($directors) < 2) {
-    $directors[] =
-        emptyOfficial('DIRECTOR');
-}
-
-
-/*
-|--------------------------------------------------------------------------
 | Errors
 |--------------------------------------------------------------------------
 */
 
 $errors = [];
 
-if ($directoryError !== null) {
-    $errors[] = $directoryError;
-}
-
 
 /*
 |--------------------------------------------------------------------------
-| Process POST
+| POST
 |--------------------------------------------------------------------------
 */
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
+    /*
+    |--------------------------------------------------------------------------
+    | Submission action
+    |--------------------------------------------------------------------------
+    */
+
+    $formAction =
+        (string)
+        ($_POST['form_action'] ?? 'save_continue');
+
+    $isWizardNavigation =
+        $formAction === 'wizard_navigation';
+
+    $wizardDestination =
+        filter_input(
+            INPUT_POST,
+            'wizard_destination',
+            FILTER_VALIDATE_INT
+        );
+
+    if (
+        $wizardDestination === false ||
+        $wizardDestination === null ||
+        $wizardDestination < 1 ||
+        $wizardDestination > 6
+    ) {
+        $wizardDestination = 5;
+    }
 
 
     /*
@@ -453,7 +463,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     */
 
     $submittedToken =
-        (string) ($_POST['csrf_token'] ?? '');
+        (string)
+        ($_POST['csrf_token'] ?? '');
 
     if (
         $submittedToken === '' ||
@@ -469,7 +480,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     /*
     |--------------------------------------------------------------------------
-    | Named officials
+    | Principal officials
     |--------------------------------------------------------------------------
     */
 
@@ -480,19 +491,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $postedOfficials = [];
     }
 
-
-    $officialDefinitions = [
+    $definitions = [
         'chairperson' => 'CHAIRPERSON',
-        'treasurer'   => 'TREASURER',
-        'secretary'   => 'SECRETARY',
+        'treasurer' => 'TREASURER',
+        'secretary' => 'SECRETARY',
     ];
-
 
     $namedOfficials = [];
 
-
     foreach (
-        $officialDefinitions
+        $definitions
         as $formKey => $designation
     ) {
 
@@ -502,14 +510,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ? $postedOfficials[$formKey]
                 : [];
 
+        $namedOfficials[$formKey] = [
 
-        $record = [
+            'form_key' => $formKey,
 
-            'form_key' =>
-                $formKey,
-
-            'designation' =>
-                $designation,
+            'designation' => $designation,
 
             'full_name' =>
                 cleanString(
@@ -551,16 +556,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $posted['existing_signature'] ?? ''
                 ),
         ];
-
-
-        $namedOfficials[$formKey] =
-            $record;
     }
 
 
     /*
     |--------------------------------------------------------------------------
-    | Directors
+    | Optional Directors
     |--------------------------------------------------------------------------
     */
 
@@ -571,9 +572,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $postedDirectors = [];
     }
 
-
     $submittedDirectors = [];
-
 
     foreach (
         $postedDirectors
@@ -584,11 +583,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             continue;
         }
 
-
         $record = [
-
-            'form_key' =>
-                'director_' . $index,
 
             'director_index' =>
                 (int) $index,
@@ -637,29 +632,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ),
         ];
 
-
         /*
-        | Do not discard partially completed Director forms.
-        |
-        | If ANY value is entered, preserve the whole card so
-        | validation errors do not clear the user's input.
+        | Ignore completely blank Director cards.
         */
 
-        $submittedDirectors[] =
-            $record;
+        if (directorHasData($record)) {
+            $submittedDirectors[] =
+                $record;
+        }
     }
 
 
     /*
     |--------------------------------------------------------------------------
-    | Repopulate page immediately
+    | Repopulate immediately
     |--------------------------------------------------------------------------
-    |
-    | This is important:
-    |
-    | if validation fails later, the page uses POSTed values instead
-    | of reloading old database values.
-    |
     */
 
     $chairperson =
@@ -672,48 +659,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $namedOfficials['secretary'];
 
     $directors =
-        $submittedDirectors;
-
-
-    while (count($directors) < 2) {
-        $directors[] =
-            emptyOfficial('DIRECTOR');
-    }
+        array_values(
+            $submittedDirectors
+        );
 
 
     /*
     |--------------------------------------------------------------------------
-    | Validate textual particulars
+    | Full validation for Save & Continue
     |--------------------------------------------------------------------------
+    |
+    | Only Chairperson, Treasurer and Secretary are mandatory.
+    |
     */
 
-    $allOfficials = [
-        $chairperson,
-        $treasurer,
-        $secretary,
-    ];
-
-    foreach ($directors as $director) {
-        $allOfficials[] = $director;
-    }
-
-
-    foreach (
-        $allOfficials
-        as $position => $record
-    ) {
-
-        $label =
-            $record['designation'] === 'DIRECTOR'
-                ? 'Director ' .
-                    max(
-                        1,
-                        $position - 2
-                    )
-                : officialLabel(
-                    $record['designation']
-                );
-
+    if (!$isWizardNavigation) {
 
         $requiredFields = [
 
@@ -737,426 +697,122 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ];
 
 
+        /*
+        |--------------------------------------------------------------------------
+        | Principal officials
+        |--------------------------------------------------------------------------
+        */
+
         foreach (
-            $requiredFields
-            as $field => $fieldLabel
+            [
+                $chairperson,
+                $treasurer,
+                $secretary,
+            ]
+            as $record
         ) {
 
-            if (
-                trim(
-                    (string) $record[$field]
-                ) === ''
+            $label =
+                officialLabel(
+                    $record['designation']
+                );
+
+            foreach (
+                $requiredFields
+                as $field => $fieldLabel
             ) {
 
+                if (
+                    trim(
+                        (string)
+                        ($record[$field] ?? '')
+                    ) === ''
+                ) {
+                    $errors[] =
+                        $label .
+                        ': ' .
+                        $fieldLabel .
+                        ' is required.';
+                }
+            }
+
+            if (
+                $record['email'] !== '' &&
+                !filter_var(
+                    $record['email'],
+                    FILTER_VALIDATE_EMAIL
+                )
+            ) {
                 $errors[] =
                     $label .
-                    ': ' .
-                    $fieldLabel .
-                    ' is required.';
+                    ': enter a valid email address.';
             }
         }
 
 
-        if (
-            $record['email'] !== '' &&
-            !filter_var(
-                $record['email'],
-                FILTER_VALIDATE_EMAIL
-            )
+        /*
+        |--------------------------------------------------------------------------
+        | Optional Directors
+        |--------------------------------------------------------------------------
+        |
+        | A Director is not required.
+        |
+        | But once somebody enters a Director, complete that Director's textual
+        | particulars so a malformed partial Director is not stored.
+        |
+        */
+
+        foreach (
+            $directors
+            as $index => $director
         ) {
 
-            $errors[] =
-                $label .
-                ': enter a valid email address.';
+            $label =
+                'Director ' .
+                ($index + 1);
+
+            foreach (
+                $requiredFields
+                as $field => $fieldLabel
+            ) {
+
+                if (
+                    trim(
+                        (string)
+                        ($director[$field] ?? '')
+                    ) === ''
+                ) {
+                    $errors[] =
+                        $label .
+                        ': ' .
+                        $fieldLabel .
+                        ' is required.';
+                }
+            }
+
+            if (
+                $director['email'] !== '' &&
+                !filter_var(
+                    $director['email'],
+                    FILTER_VALIDATE_EMAIL
+                )
+            ) {
+                $errors[] =
+                    $label .
+                    ': enter a valid email address.';
+            }
         }
     }
 
 
     /*
     |--------------------------------------------------------------------------
-    | At least two additional Directors
-    |--------------------------------------------------------------------------
-    */
-
-    if (count($directors) < 2) {
-
-        $errors[] =
-            'At least two additional Directors are required.';
-    }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Do not process uploads if directory is unavailable
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        $directoryError === null &&
-        !is_dir($uploadDirectory)
-    ) {
-
-        $errors[] =
-            'Signature storage is currently unavailable.';
-    }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | File upload utility
+    | Upload helpers
     |--------------------------------------------------------------------------
     */
 
     $newlyUploadedFiles = [];
 
-
-    $processSignature = function (
-        ?array $file,
-        string $existingSignature,
-        string $personLabel
-    ) use (
-        $uploadDirectory,
-        $uploadWebPath,
-        $maximumUploadSize,
-        $allowedMimeTypes,
-        &$newlyUploadedFiles,
-        &$errors
-    ): string {
-
-
-        /*
-        | No new file selected.
-        */
-
-        if (
-            $file === null ||
-            !isset($file['error']) ||
-            (int) $file['error'] ===
-                UPLOAD_ERR_NO_FILE
-        ) {
-
-            if ($existingSignature !== '') {
-                return $existingSignature;
-            }
-
-
-            $errors[] =
-                $personLabel .
-                ': Signature is required.';
-
-            return '';
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | PHP upload errors
-        |--------------------------------------------------------------------------
-        */
-
-        $errorCode =
-            (int) $file['error'];
-
-
-        if ($errorCode !== UPLOAD_ERR_OK) {
-
-            $messages = [
-
-                UPLOAD_ERR_INI_SIZE =>
-                    'The signature exceeds the server upload size limit.',
-
-                UPLOAD_ERR_FORM_SIZE =>
-                    'The signature exceeds the permitted form size.',
-
-                UPLOAD_ERR_PARTIAL =>
-                    'The signature was only partially uploaded.',
-
-                UPLOAD_ERR_NO_FILE =>
-                    'No signature file was uploaded.',
-
-                UPLOAD_ERR_NO_TMP_DIR =>
-                    'The server temporary upload directory is missing.',
-
-                UPLOAD_ERR_CANT_WRITE =>
-                    'The server could not write the signature to disk.',
-
-                UPLOAD_ERR_EXTENSION =>
-                    'A PHP extension stopped the signature upload.',
-            ];
-
-
-            $errors[] =
-                $personLabel .
-                ': ' .
-                (
-                    $messages[$errorCode]
-                    ??
-                    'Signature upload failed with error code ' .
-                    $errorCode .
-                    '.'
-                );
-
-
-            error_log(
-                'Signature upload error [' .
-                $personLabel .
-                '] code=' .
-                $errorCode
-            );
-
-
-            return $existingSignature;
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | File metadata
-        |--------------------------------------------------------------------------
-        */
-
-        $temporaryFile =
-            (string) ($file['tmp_name'] ?? '');
-
-        $fileSize =
-            (int) ($file['size'] ?? 0);
-
-
-        if (
-            $temporaryFile === '' ||
-            !is_uploaded_file($temporaryFile)
-        ) {
-
-            $errors[] =
-                $personLabel .
-                ': The uploaded signature could not be verified.';
-
-            return $existingSignature;
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Size
-        |--------------------------------------------------------------------------
-        */
-
-        if ($fileSize <= 0) {
-
-            $errors[] =
-                $personLabel .
-                ': The signature file is empty.';
-
-            return $existingSignature;
-        }
-
-
-        if (
-            $fileSize >
-            $maximumUploadSize
-        ) {
-
-            $errors[] =
-                $personLabel .
-                ': Signature must not exceed 5 MB.';
-
-            return $existingSignature;
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | MIME type
-        |--------------------------------------------------------------------------
-        */
-
-        try {
-
-            $finfo =
-                new finfo(
-                    FILEINFO_MIME_TYPE
-                );
-
-            $mimeType =
-                $finfo->file(
-                    $temporaryFile
-                );
-
-        } catch (Throwable $exception) {
-
-            error_log(
-                'Unable to inspect signature MIME type [' .
-                $personLabel .
-                ']: ' .
-                $exception->getMessage()
-            );
-
-            $errors[] =
-                $personLabel .
-                ': The signature file type could not be verified.';
-
-            return $existingSignature;
-        }
-
-
-        if (
-            !is_string($mimeType) ||
-            !isset(
-                $allowedMimeTypes[$mimeType]
-            )
-        ) {
-
-            $errors[] =
-                $personLabel .
-                ': Signature must be a JPG, PNG, WEBP or PDF file.';
-
-            return $existingSignature;
-        }
-
-
-        $extension =
-            $allowedMimeTypes[$mimeType];
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Safe filename
-        |--------------------------------------------------------------------------
-        */
-
-        $safeLabel =
-            strtolower(
-                preg_replace(
-                    '/[^a-zA-Z0-9]+/',
-                    '-',
-                    $personLabel
-                ) ?? 'signature'
-            );
-
-
-        $safeLabel =
-            trim(
-                $safeLabel,
-                '-'
-            );
-
-
-        if ($safeLabel === '') {
-            $safeLabel = 'signature';
-        }
-
-
-        try {
-
-            $randomPart =
-                bin2hex(
-                    random_bytes(12)
-                );
-
-        } catch (Throwable $exception) {
-
-            $randomPart =
-                str_replace(
-                    '.',
-                    '',
-                    uniqid('', true)
-                );
-        }
-
-
-        $fileName =
-            $safeLabel .
-            '-' .
-            $randomPart .
-            '.' .
-            $extension;
-
-
-        $destination =
-            $uploadDirectory .
-            DIRECTORY_SEPARATOR .
-            $fileName;
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Move uploaded file
-        |--------------------------------------------------------------------------
-        */
-
-        if (
-            !move_uploaded_file(
-                $temporaryFile,
-                $destination
-            )
-        ) {
-
-            $lastError =
-                error_get_last();
-
-
-            error_log(
-                'move_uploaded_file failed [' .
-                $personLabel .
-                '] destination=' .
-                $destination .
-                ' | ' .
-                ($lastError['message'] ?? 'Unknown error')
-            );
-
-
-            $errors[] =
-                $personLabel .
-                ': The signature was received but could not be saved.';
-
-            return $existingSignature;
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | File permissions
-        |--------------------------------------------------------------------------
-        */
-
-        @chmod(
-            $destination,
-            0644
-        );
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Track newly uploaded file
-        |--------------------------------------------------------------------------
-        |
-        | If later validation/database operations fail, these files
-        | can be removed without touching existing signatures.
-        |
-        */
-
-        $newlyUploadedFiles[] =
-            $destination;
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Return web path for database
-        |--------------------------------------------------------------------------
-        */
-
-        return
-            $uploadWebPath .
-            '/' .
-            $fileName;
-    };
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Helper for extracting PHP upload array
-    |--------------------------------------------------------------------------
-    */
 
     $getNamedSignatureFile =
         static function (
@@ -1164,18 +820,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ): ?array {
 
             if (
-                !isset(
-                    $_FILES['signatures']
-                ) ||
-                !is_array(
-                    $_FILES['signatures']
-                )
-            ) {
-                return null;
-            }
-
-
-            if (
+                !isset($_FILES['signatures']) ||
+                !is_array($_FILES['signatures']) ||
                 !isset(
                     $_FILES['signatures']['error'][$formKey]
                 )
@@ -1183,25 +829,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 return null;
             }
 
-
             return [
-
                 'name' =>
                     $_FILES['signatures']['name'][$formKey]
                     ?? '',
-
                 'type' =>
                     $_FILES['signatures']['type'][$formKey]
                     ?? '',
-
                 'tmp_name' =>
                     $_FILES['signatures']['tmp_name'][$formKey]
                     ?? '',
-
                 'error' =>
                     $_FILES['signatures']['error'][$formKey]
                     ?? UPLOAD_ERR_NO_FILE,
-
                 'size' =>
                     $_FILES['signatures']['size'][$formKey]
                     ?? 0,
@@ -1215,18 +855,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ): ?array {
 
             if (
-                !isset(
-                    $_FILES['director_signatures']
-                ) ||
+                !isset($_FILES['director_signatures']) ||
                 !is_array(
                     $_FILES['director_signatures']
-                )
-            ) {
-                return null;
-            }
-
-
-            if (
+                ) ||
                 !isset(
                     $_FILES['director_signatures']['error'][$index]
                 )
@@ -1234,25 +866,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 return null;
             }
 
-
             return [
-
                 'name' =>
                     $_FILES['director_signatures']['name'][$index]
                     ?? '',
-
                 'type' =>
                     $_FILES['director_signatures']['type'][$index]
                     ?? '',
-
                 'tmp_name' =>
                     $_FILES['director_signatures']['tmp_name'][$index]
                     ?? '',
-
                 'error' =>
                     $_FILES['director_signatures']['error'][$index]
                     ?? UPLOAD_ERR_NO_FILE,
-
                 'size' =>
                     $_FILES['director_signatures']['size'][$index]
                     ?? 0,
@@ -1262,105 +888,378 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     /*
     |--------------------------------------------------------------------------
-    | Process named-official signatures
+    | Process optional signature
     |--------------------------------------------------------------------------
-    |
-    | We process the signatures even if another textual validation error
-    | exists. Their paths are then preserved in hidden fields when the page
-    | reloads, so a successfully uploaded signature does not have to be
-    | uploaded again.
-    |
     */
 
-    if ($directoryError === null) {
+    $processSignature =
+        function (
+            ?array $file,
+            string $existingSignature,
+            string $personLabel
+        ) use (
+            $uploadDirectory,
+            $uploadWebPath,
+            $maximumUploadSize,
+            $allowedMimeTypes,
+            $directoryError,
+            &$newlyUploadedFiles,
+            &$errors
+        ): string {
 
-        foreach (
-            $namedOfficials
-            as $formKey => &$record
-        ) {
+            /*
+            | No file selected = perfectly valid.
+            */
 
-            $personLabel =
-                officialLabel(
-                    $record['designation']
+            if (
+                $file === null ||
+                !isset($file['error']) ||
+                (int) $file['error'] ===
+                    UPLOAD_ERR_NO_FILE
+            ) {
+                return $existingSignature;
+            }
+
+
+            /*
+            | Storage only matters when a file was actually selected.
+            */
+
+            if (
+                $directoryError !== null ||
+                !is_dir($uploadDirectory) ||
+                !is_writable($uploadDirectory)
+            ) {
+                $errors[] =
+                    $personLabel .
+                    ': signature storage is currently unavailable.';
+
+                return $existingSignature;
+            }
+
+
+            $errorCode =
+                (int) $file['error'];
+
+            if ($errorCode !== UPLOAD_ERR_OK) {
+
+                $errors[] =
+                    $personLabel .
+                    ': the signature upload failed.';
+
+                return $existingSignature;
+            }
+
+
+            $temporaryFile =
+                (string)
+                ($file['tmp_name'] ?? '');
+
+            $fileSize =
+                (int)
+                ($file['size'] ?? 0);
+
+
+            if (
+                $temporaryFile === '' ||
+                !                !is_uploaded_file(
+                    $temporaryFile
+                )
+            ) {
+                $errors[] =
+                    $personLabel .
+                    ': the uploaded signature could not be verified.';
+
+                return $existingSignature;
+            }
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | File size
+            |--------------------------------------------------------------------------
+            */
+
+            if ($fileSize <= 0) {
+
+                $errors[] =
+                    $personLabel .
+                    ': the selected signature file is empty.';
+
+                return $existingSignature;
+            }
+
+
+            if (
+                $fileSize >
+                $maximumUploadSize
+            ) {
+
+                $errors[] =
+                    $personLabel .
+                    ': signature must not exceed 5 MB.';
+
+                return $existingSignature;
+            }
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | MIME validation
+            |--------------------------------------------------------------------------
+            */
+
+            try {
+
+                $finfo =
+                    new finfo(
+                        FILEINFO_MIME_TYPE
+                    );
+
+                $mimeType =
+                    $finfo->file(
+                        $temporaryFile
+                    );
+
+            } catch (Throwable $exception) {
+
+                error_log(
+                    'Unable to inspect signature MIME type [' .
+                    $personLabel .
+                    ']: ' .
+                    $exception->getMessage()
+                );
+
+                $errors[] =
+                    $personLabel .
+                    ': the signature file type could not be verified.';
+
+                return $existingSignature;
+            }
+
+
+            if (
+                !is_string($mimeType) ||
+                !isset(
+                    $allowedMimeTypes[
+                        $mimeType
+                    ]
+                )
+            ) {
+
+                $errors[] =
+                    $personLabel .
+                    ': signature must be a JPG, PNG, WEBP or PDF file.';
+
+                return $existingSignature;
+            }
+
+
+            $extension =
+                $allowedMimeTypes[
+                    $mimeType
+                ];
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Safe filename
+            |--------------------------------------------------------------------------
+            */
+
+            $safeLabel =
+                strtolower(
+                    preg_replace(
+                        '/[^a-zA-Z0-9]+/',
+                        '-',
+                        $personLabel
+                    ) ?? 'signature'
                 );
 
 
-            $file =
-                $getNamedSignatureFile(
-                    $formKey
+            $safeLabel =
+                trim(
+                    $safeLabel,
+                    '-'
                 );
 
 
-            $record['signature'] =
-                $processSignature(
-                    $file,
-                    $record['existing_signature'],
-                    $personLabel
-                );
+            if ($safeLabel === '') {
+                $safeLabel =
+                    'signature';
+            }
 
 
-            $record['existing_signature'] =
-                $record['signature'];
-        }
+            try {
 
-        unset($record);
+                $randomPart =
+                    bin2hex(
+                        random_bytes(12)
+                    );
 
+            } catch (Throwable $exception) {
 
-        /*
-        |--------------------------------------------------------------------------
-        | Process Director signatures
-        |--------------------------------------------------------------------------
-        */
-
-        foreach (
-            $submittedDirectors
-            as $index => &$record
-        ) {
-
-            $personLabel =
-                'Director ' .
-                ($index + 1);
+                $randomPart =
+                    str_replace(
+                        '.',
+                        '',
+                        uniqid('', true)
+                    );
+            }
 
 
-            $file =
-                $getDirectorSignatureFile(
-                    (int) $record['director_index']
-                );
+            $fileName =
+                $safeLabel .
+                '-' .
+                $randomPart .
+                '.' .
+                $extension;
 
 
-            $record['signature'] =
-                $processSignature(
-                    $file,
-                    $record['existing_signature'],
-                    $personLabel
-                );
+            $destination =
+                $uploadDirectory .
+                DIRECTORY_SEPARATOR .
+                $fileName;
 
 
-            $record['existing_signature'] =
-                $record['signature'];
-        }
+            /*
+            |--------------------------------------------------------------------------
+            | Store upload
+            |--------------------------------------------------------------------------
+            */
 
-        unset($record);
-    }
+            if (
+                !move_uploaded_file(
+                    $temporaryFile,
+                    $destination
+                )
+            ) {
+
+                $errors[] =
+                    $personLabel .
+                    ': the signature could not be saved.';
+
+                return $existingSignature;
+            }
+
+
+            @chmod(
+                $destination,
+                0644
+            );
+
+
+            $newlyUploadedFiles[] =
+                $destination;
+
+
+            return
+                $uploadWebPath .
+                '/' .
+                $fileName;
+        };
 
 
     /*
     |--------------------------------------------------------------------------
-    | Rebuild display values AFTER uploads
+    | Process principal-official signatures
     |--------------------------------------------------------------------------
-    |
-    | This is what prevents the form from clearing when validation fails.
-    |
+    */
+
+    foreach (
+        $namedOfficials
+        as $formKey => &$record
+    ) {
+
+        $file =
+            $getNamedSignatureFile(
+                $formKey
+            );
+
+
+        $record['signature'] =
+            $processSignature(
+                $file,
+                $record[
+                    'existing_signature'
+                ],
+                officialLabel(
+                    $record[
+                        'designation'
+                    ]
+                )
+            );
+
+
+        $record[
+            'existing_signature'
+        ] =
+            $record['signature'];
+    }
+
+    unset($record);
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Process Director signatures
+    |--------------------------------------------------------------------------
+    */
+
+    foreach (
+        $submittedDirectors
+        as $index => &$record
+    ) {
+
+        $file =
+            $getDirectorSignatureFile(
+                (int)
+                $record[
+                    'director_index'
+                ]
+            );
+
+
+        $record['signature'] =
+            $processSignature(
+                $file,
+                $record[
+                    'existing_signature'
+                ],
+                'Director ' .
+                ($index + 1)
+            );
+
+
+        $record[
+            'existing_signature'
+        ] =
+            $record['signature'];
+    }
+
+    unset($record);
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Rebuild values after uploads
+    |--------------------------------------------------------------------------
     */
 
     $chairperson =
-        $namedOfficials['chairperson'];
+        $namedOfficials[
+            'chairperson'
+        ];
 
     $treasurer =
-        $namedOfficials['treasurer'];
+        $namedOfficials[
+            'treasurer'
+        ];
 
     $secretary =
-        $namedOfficials['secretary'];
+        $namedOfficials[
+            'secretary'
+        ];
 
     $directors =
         array_values(
@@ -1368,16 +1267,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         );
 
 
-    while (count($directors) < 2) {
-        $directors[] =
-            emptyOfficial('DIRECTOR');
-    }
-
-
     /*
     |--------------------------------------------------------------------------
-    | Final signature validation
+    | Officials to save
     |--------------------------------------------------------------------------
+    |
+    | The three principal officials are always retained.
+    |
+    | Directors are included only when a Director has actually been entered.
+    |
     */
 
     $officialsToSave = [
@@ -1387,64 +1285,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     ];
 
 
-    foreach ($directors as $director) {
-        $officialsToSave[] =
-            $director;
-    }
-
-
     foreach (
-        $officialsToSave
-        as $index => $record
+        $directors
+        as $director
     ) {
 
-        $label =
-            $record['designation'] === 'DIRECTOR'
-                ? 'Director ' .
-                    max(
-                        1,
-                        $index - 2
-                    )
-                : officialLabel(
-                    $record['designation']
-                );
-
-
         if (
-            trim(
-                (string)
-                ($record['signature'] ?? '')
-            ) === ''
+            directorHasData(
+                $director
+            )
         ) {
 
-            /*
-            | Avoid duplicate "Signature required" messages if
-            | processSignature already added one.
-            */
-
-            $expectedMessage =
-                $label .
-                ': Signature is required.';
-
-
-            if (
-                !in_array(
-                    $expectedMessage,
-                    $errors,
-                    true
-                )
-            ) {
-
-                $errors[] =
-                    $expectedMessage;
-            }
+            $officialsToSave[] =
+                $director;
         }
     }
 
 
     /*
     |--------------------------------------------------------------------------
-    | Save only when everything is valid
+    | Save
     |--------------------------------------------------------------------------
     */
 
@@ -1500,8 +1360,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 
             if (
-                $lockedApplication['status'] !==
-                'draft'
+                $lockedApplication[
+                    'status'
+                ] !== 'draft'
             ) {
 
                 throw new RuntimeException(
@@ -1512,21 +1373,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             /*
             |--------------------------------------------------------------------------
-            | Remember old signature paths
+            | Existing signature paths
             |--------------------------------------------------------------------------
-            |
-            | We do not delete old physical files until the new database
-            | transaction has committed successfully.
-            |
             */
 
             $statement =
                 $connection->prepare(
                     "
-                    SELECT
-                        signature
+                    SELECT signature
                     FROM application_officials
-                    WHERE application_id = :application_id
+                    WHERE application_id =
+                        :application_id
                     "
                 );
 
@@ -1545,7 +1402,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             /*
             |--------------------------------------------------------------------------
-            | Replace official records
+            | Replace officials
             |--------------------------------------------------------------------------
             */
 
@@ -1553,7 +1410,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $connection->prepare(
                     "
                     DELETE FROM application_officials
-                    WHERE application_id = :application_id
+                    WHERE application_id =
+                        :application_id
                     "
                 );
 
@@ -1606,34 +1464,80 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 as $record
             ) {
 
+                /*
+                |--------------------------------------------------------------------------
+                | During wizard navigation we don't want completely empty
+                | principal-official placeholder rows in the database.
+                |--------------------------------------------------------------------------
+                */
+
+                $hasTextualData =
+                    $record['full_name'] !== '' ||
+                    $record['nationality'] !== '' ||
+                    $record['id_passport_number'] !== '' ||
+                    $record['kra_pin'] !== '' ||
+                    $record['phone_number'] !== '' ||
+                    $record['email'] !== '' ||
+                    $record['signature'] !== '';
+
+
+                if (
+                    $isWizardNavigation &&
+                    !$hasTextualData
+                ) {
+
+                    continue;
+                }
+
+
                 $insert->execute([
 
                     ':application_id'
                         => $applicationId,
 
                     ':full_name'
-                        => $record['full_name'],
+                        => $record[
+                            'full_name'
+                        ],
 
                     ':designation'
-                        => $record['designation'],
+                        => $record[
+                            'designation'
+                        ],
 
                     ':nationality'
-                        => $record['nationality'],
+                        => $record[
+                            'nationality'
+                        ],
 
                     ':id_passport_number'
-                        => $record['id_passport_number'],
+                        => $record[
+                            'id_passport_number'
+                        ],
 
                     ':kra_pin'
-                        => $record['kra_pin'],
+                        => $record[
+                            'kra_pin'
+                        ],
 
                     ':phone_number'
-                        => $record['phone_number'],
+                        => $record[
+                            'phone_number'
+                        ],
 
                     ':email'
-                        => $record['email'],
+                        => $record[
+                            'email'
+                        ],
 
                     ':signature'
-                        => $record['signature'],
+                        => $record[
+                            'signature'
+                        ] !== ''
+                            ? $record[
+                                'signature'
+                            ]
+                            : null,
                 ]);
             }
 
@@ -1700,6 +1604,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
 
 
+            $directorCount =
+                count($directors);
+
+
+            $auditDescription =
+                'Principal officials saved.' .
+                (
+                    $directorCount > 0
+                        ? ' ' .
+                          $directorCount .
+                          ' optional director(s) saved.'
+                        : ' No additional directors recorded.'
+                );
+
+
             $statement->execute([
 
                 ':application_id'
@@ -1709,44 +1628,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     => $userId,
 
                 ':description'
-                    => count(
-                        $officialsToSave
-                    ) .
-                    ' official/director record(s) saved.',
+                    => $auditDescription,
             ]);
 
-
-            /*
-            |--------------------------------------------------------------------------
-            | Commit
-            |--------------------------------------------------------------------------
-            */
 
             $connection->commit();
 
 
             /*
             |--------------------------------------------------------------------------
-            | Remove replaced/orphaned OLD signature files
+            | Remove obsolete signature files
             |--------------------------------------------------------------------------
-            |
-            | Only delete files that:
-            |
-            | 1. were previously stored,
-            | 2. are no longer referenced,
-            | 3. belong to this application's signature directory.
-            |
             */
 
             $currentSignaturePaths =
                 array_values(
                     array_filter(
                         array_map(
-                            static fn (array $record): string =>
-                                trim(
+                            static function (
+                                array $record
+                            ): string {
+
+                                return trim(
                                     (string)
-                                    ($record['signature'] ?? '')
-                                ),
+                                    (
+                                        $record[
+                                            'signature'
+                                        ] ?? ''
+                                    )
+                                );
+                            },
                             $officialsToSave
                         )
                     )
@@ -1760,7 +1671,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $oldWebPath =
                     trim(
-                        (string) $oldWebPath
+                        (string)
+                        $oldWebPath
                     );
 
 
@@ -1780,11 +1692,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
 
-                /*
-                | Only operate on our expected application
-                | signature directory.
-                */
-
                 $expectedPrefix =
                     $uploadWebPath .
                     '/';
@@ -1800,16 +1707,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
 
-                $oldFileName =
-                    basename(
-                        $oldWebPath
-                    );
-
-
                 $oldPhysicalPath =
                     $uploadDirectory .
                     DIRECTORY_SEPARATOR .
-                    $oldFileName;
+                    basename(
+                        $oldWebPath
+                    );
 
 
                 if (
@@ -1817,7 +1720,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $oldPhysicalPath
                     )
                 ) {
-
                     @unlink(
                         $oldPhysicalPath
                     );
@@ -1827,7 +1729,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             /*
             |--------------------------------------------------------------------------
-            | Continue to Review
+            | Wizard navigation
+            |--------------------------------------------------------------------------
+            */
+
+            if ($isWizardNavigation) {
+
+                $wizardPages = [
+
+                    1 => 'create.php',
+
+                    2 => 'objectives.php',
+
+                    3 => 'beneficiaries.php',
+
+                    4 => 'financial-year.php',
+
+                    5 => 'officials.php',
+
+                    6 => 'review.php',
+                ];
+
+
+                $destinationPage =
+                    $wizardPages[
+                        $wizardDestination
+                    ] ??
+                    'officials.php';
+
+
+                header(
+                    'Location: /pbo-portal/applications/' .
+                    $destinationPage .
+                    '?id=' .
+                    urlencode(
+                        (string)
+                        $applicationId
+                    )
+                );
+
+                exit;
+            }
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Normal Save & Continue → Review
             |--------------------------------------------------------------------------
             */
 
@@ -1841,23 +1788,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             exit;
 
+
         } catch (Throwable $exception) {
 
             if (
                 $connection->inTransaction()
             ) {
-
                 $connection->rollBack();
             }
 
 
             /*
             |--------------------------------------------------------------------------
-            | Database failed — remove only NEW uploads
+            | Remove newly uploaded files after DB failure
             |--------------------------------------------------------------------------
-            |
-            | Existing signatures remain untouched.
-            |
             */
 
             foreach (
@@ -1870,7 +1814,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $uploadedFile
                     )
                 ) {
-
                     @unlink(
                         $uploadedFile
                     );
@@ -1885,7 +1828,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 
             $errors[] =
-                'The officials and directors could not be saved. Your entered information has been retained on this page.';
+                'The officials could not be saved. Your entered information has been retained on this page.';
         }
     }
 }
@@ -1897,17 +1840,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 |--------------------------------------------------------------------------
 */
 
-require_once __DIR__ . '/../includes/header.php';
+require_once __DIR__ .
+    '/../includes/header.php';
 
 ?>
 
 
 <div class="applications-page">
-
-
-    <!-- ==========================================================
-         PAGE HEADER
-         ========================================================== -->
 
     <section class="page-header">
 
@@ -1918,22 +1857,18 @@ require_once __DIR__ . '/../includes/header.php';
             </span>
 
             <h1>
-                Officials and Directors
+                Officials
             </h1>
 
             <p class="subtitle">
-                Step 5 of 6 — Enter the personal particulars of the
-                organization's officials and additional directors.
+                Step 5 of 6 — Enter the organization's principal officials.
+                Additional directors may be added where applicable.
             </p>
 
         </div>
 
     </section>
 
-
-    <!-- ==========================================================
-         APPLICATION SUMMARY
-         ========================================================== -->
 
     <div class="admin-info">
 
@@ -1947,7 +1882,9 @@ require_once __DIR__ . '/../includes/header.php';
 
         <?php if (
             !empty(
-                $application['application_reference']
+                $application[
+                    'application_reference'
+                ]
             )
         ): ?>
 
@@ -1969,134 +1906,47 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
 
 
-    <!-- ==========================================================
-         PROGRESS
-         ========================================================== -->
+    <?php
 
-    <div
-        style="
-            margin-bottom: 22px;
-            padding: 16px 18px;
-            background: #ffffff;
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            box-shadow: var(--shadow-sm);
-        "
-    >
+    $wizardCurrentStep = 5;
 
-        <div
-            style="
-                display: flex;
-                justify-content: space-between;
-                gap: 10px;
-                margin-bottom: 10px;
-                color: var(--text-secondary);
-                font-size: 11px;
-                font-weight: 700;
-            "
-        >
+    require __DIR__ .
+        '/../includes/application-wizard.php';
 
-            <span>1. Organization</span>
-            <span>2. Objectives</span>
-            <span>3. Beneficiaries</span>
-            <span>4. Financial Year</span>
-
-            <span style="color: var(--blue);">
-                5. Officials
-            </span>
-
-            <span>6. Review</span>
-
-        </div>
+    ?>
 
 
-        <div
-            style="
-                width: 100%;
-                height: 7px;
-                overflow: hidden;
-                background: #e9edf1;
-                border-radius: 20px;
-            "
-        >
-
-            <div
-                style="
-                    width: 83.3333%;
-                    height: 100%;
-                    background:
-                        linear-gradient(
-                            90deg,
-                            var(--blue),
-                            var(--blue-medium)
-                        );
-                "
-            ></div>
-
-        </div>
-
-    </div>
-
-
-    <!-- ==========================================================
-         STORAGE ERROR
-         ========================================================== -->
-
-    <?php if (
-        $directoryError !== null
-    ): ?>
+    <?php if ($errors !== []): ?>
 
         <div class="alert alert-error">
 
             <strong>
-                Signature storage is unavailable.
+                Please correct the following:
             </strong>
 
-            <p style="margin: 6px 0 0;">
-                <?= e($directoryError) ?>
-            </p>
+            <ul
+                style="
+                    margin: 8px 0 0;
+                    padding-left: 20px;
+                "
+            >
+
+                <?php foreach (
+                    $errors as $error
+                ): ?>
+
+                    <li>
+                        <?= e($error) ?>
+                    </li>
+
+                <?php endforeach; ?>
+
+            </ul>
 
         </div>
 
     <?php endif; ?>
 
-
-    <!-- ==========================================================
-         FORM ERRORS
-         ========================================================== -->
-
-    <?php if ($errors !== []): ?>
-
-    <div class="alert alert-error">
-
-        <strong>
-            Please correct the following:
-        </strong>
-
-        <ul
-            style="
-                margin: 8px 0 0;
-                padding-left: 20px;
-            "
-        >
-
-            <?php foreach ($errors as $error): ?>
-
-                <li>
-                    <?= e($error) ?>
-                </li>
-
-            <?php endforeach; ?>
-
-        </ul>
-
-    </div>
-
-<?php endif; ?>
-
-    <!-- ==========================================================
-         OFFICIALS FORM
-         ========================================================== -->
 
     <form
         method="post"
@@ -2118,6 +1968,20 @@ require_once __DIR__ . '/../includes/header.php';
             value="<?= (int) $applicationId ?>"
         >
 
+        <input
+            type="hidden"
+            name="form_action"
+            id="form_action"
+            value="save_continue"
+        >
+
+        <input
+            type="hidden"
+            name="wizard_destination"
+            id="wizard_destination"
+            value=""
+        >
+
 
         <!-- ======================================================
              INTRODUCTION
@@ -2134,12 +1998,11 @@ require_once __DIR__ . '/../includes/header.php';
                 <div>
 
                     <h2>
-                        Personal Particulars
+                        Principal Officials
                     </h2>
 
                     <p>
-                        Enter the particulars of the Chairperson,
-                        Treasurer, Secretary and additional Directors.
+                        Chairperson, Treasurer and Secretary are required.
                     </p>
 
                 </div>
@@ -2149,528 +2012,331 @@ require_once __DIR__ . '/../includes/header.php';
 
             <div class="admin-info">
 
-                Complete the seven particulars for each person:
+                Complete the required particulars for the
+                <strong>Chairperson</strong>,
+                <strong>Treasurer</strong> and
+                <strong>Secretary</strong>.
 
-                <strong>Name</strong>,
-                <strong>Nationality</strong>,
-                <strong>ID / Passport Number</strong>,
-                <strong>KRA PIN</strong>,
-                <strong>Phone Number</strong>,
-                <strong>Email</strong> and
-                <strong>Signature</strong>.
-
-                At least two additional Directors should be entered.
+                Signatures are
+                <strong>optional</strong> and may be uploaded
+                where available.
 
             </div>
 
         </section>
 
 
-        <!-- ======================================================
-             CHAIRPERSON
-             ====================================================== -->
+        <?php
 
-        <section class="application-section">
+        $principalOfficials = [
 
-            <div class="application-section-heading">
+            'chairperson' => [
+                'number' => '1',
+                'title' => 'Chairperson',
+                'record' => $chairperson,
+            ],
 
-                <div class="application-section-number">
-                    1
+            'treasurer' => [
+                'number' => '2',
+                'title' => 'Treasurer',
+                'record' => $treasurer,
+            ],
+
+            'secretary' => [
+                'number' => '3',
+                'title' => 'Secretary',
+                'record' => $secretary,
+            ],
+        ];
+
+        ?>
+
+
+        <?php foreach (
+            $principalOfficials
+            as $formKey => $definition
+        ): ?>
+
+            <?php
+
+            $record =
+                $definition['record'];
+
+            $existingSignature =
+                (string)
+                (
+                    $record[
+                        'existing_signature'
+                    ]
+                    ??
+                    $record[
+                        'signature'
+                    ]
+                    ??
+                    ''
+                );
+
+            ?>
+
+
+            <section class="application-section">
+
+                <div class="application-section-heading">
+
+                    <div class="application-section-number">
+                        <?= e(
+                            $definition[
+                                'number'
+                            ]
+                        ) ?>
+                    </div>
+
+                    <div>
+
+                        <h2>
+                            <?= e(
+                                $definition[
+                                    'title'
+                                ]
+                            ) ?>
+                        </h2>
+
+                        <p>
+                            Required principal official.
+                        </p>
+
+                    </div>
+
                 </div>
 
-                <div>
-
-                    <h2>
-                        Chairperson
-                    </h2>
-
-                    <p>
-                        Personal particulars of the Chairperson.
-                    </p>
-
-                </div>
-
-            </div>
-
-
-            <div class="form-group">
-
-                <label for="chairperson_name">
-                    Name
-                    <span class="required">*</span>
-                </label>
-
-                <input
-                    type="text"
-                    id="chairperson_name"
-                    name="officials[chairperson][full_name]"
-                    maxlength="255"
-                    value="<?= e($chairperson['full_name']) ?>"
-                    required
-                >
-
-            </div>
-
-
-            <div class="form-row">
 
                 <div class="form-group">
 
-                    <label for="chairperson_nationality">
-                        Nationality
+                    <label>
+                        Name
                         <span class="required">*</span>
                     </label>
 
                     <input
                         type="text"
-                        id="chairperson_nationality"
-                        name="officials[chairperson][nationality]"
-                        maxlength="100"
-                        value="<?= e($chairperson['nationality']) ?>"
-                        required
-                    >
-
-                </div>
-
-
-                <div class="form-group">
-
-                    <label for="chairperson_id">
-                        ID / Passport Number
-                        <span class="required">*</span>
-                    </label>
-
-                    <input
-                        type="text"
-                        id="chairperson_id"
-                        name="officials[chairperson][id_passport_number]"
-                        maxlength="100"
-                        value="<?= e(
-                            $chairperson['id_passport_number']
-                        ) ?>"
-                        required
-                    >
-
-                </div>
-
-            </div>
-
-
-            <div class="form-row">
-
-                <div class="form-group">
-
-                    <label for="chairperson_kra">
-                        KRA PIN
-                        <span class="required">*</span>
-                    </label>
-
-                    <input
-                        type="text"
-                        id="chairperson_kra"
-                        name="officials[chairperson][kra_pin]"
-                        maxlength="50"
-                        value="<?= e($chairperson['kra_pin']) ?>"
-                        required
-                    >
-
-                </div>
-
-
-                <div class="form-group">
-
-                    <label for="chairperson_phone">
-                        Phone Number
-                        <span class="required">*</span>
-                    </label>
-
-                    <input
-                        type="tel"
-                        id="chairperson_phone"
-                        name="officials[chairperson][phone_number]"
-                        maxlength="50"
-                        value="<?= e(
-                            $chairperson['phone_number']
-                        ) ?>"
-                        required
-                    >
-
-                </div>
-
-            </div>
-
-
-            <div class="form-row">
-
-                <div class="form-group">
-
-                    <label for="chairperson_email">
-                        Email
-                        <span class="required">*</span>
-                    </label>
-
-                    <input
-                        type="email"
-                        id="chairperson_email"
-                        name="officials[chairperson][email]"
+                        name="officials[<?= e($formKey) ?>][full_name]"
                         maxlength="255"
-                        value="<?= e($chairperson['email']) ?>"
+                        value="<?= e(
+                            $record[
+                                'full_name'
+                            ]
+                        ) ?>"
                         required
                     >
 
                 </div>
 
 
-                <div class="form-group">
+                <div class="form-row">
 
-                    <label for="chairperson_signature">
-                        Signature
-                        <span class="required">*</span>
-                    </label>
+                    <div class="form-group">
 
+                        <label>
+                            Nationality
+                            <span class="required">*</span>                        </label>
 
-                    <!-- Preserve an already uploaded signature -->
-
-                    <input
-                        type="hidden"
-                        name="officials[chairperson][existing_signature]"
-                        value="<?= e(
-                            $chairperson['existing_signature']
-                            ??
-                            $chairperson['signature']
-                            ??
-                            ''
-                        ) ?>"
-                    >
-
-
-                    <?php if (
-                        !empty(
-                            $chairperson['existing_signature']
-                            ??
-                            $chairperson['signature']
-                            ??
-                            ''
-                        )
-                    ): ?>
-
-                        <div
-                            style="
-                                margin-bottom: 8px;
-                                padding: 9px 11px;
-                                background: var(--green-light);
-                                border: 1px solid #c3dfce;
-                                border-radius: var(--radius);
-                                color: var(--green-dark);
-                                font-size: 11px;
-                                font-weight: 700;
-                            "
+                        <input
+                            type="text"
+                            name="officials[<?= e($formKey) ?>][nationality]"
+                            maxlength="100"
+                            value="<?= e(
+                                $record[
+                                    'nationality'
+                                ]
+                            ) ?>"
+                            required
                         >
-                            &#10003; Signature already uploaded
-                        </div>
 
-                    <?php endif; ?>
+                    </div>
 
 
-                    <input
-                        type="file"
-                        id="chairperson_signature"
-                        name="signatures[chairperson]"
-                        accept=".jpg,.jpeg,.png,.webp,.pdf"
-                        <?= empty(
-                            $chairperson['existing_signature']
-                            ??
-                            $chairperson['signature']
-                            ??
-                            ''
-                        )
-                            ? 'required'
-                            : '' ?>
-                    >
+                    <div class="form-group">
 
-                    <span class="form-help">
+                        <label>
+                            ID / Passport Number
+                            <span class="required">*</span>
+                        </label>
+
+                        <input
+                            type="text"
+                            name="officials[<?= e($formKey) ?>][id_passport_number]"
+                            maxlength="100"
+                            value="<?= e(
+                                $record[
+                                    'id_passport_number'
+                                ]
+                            ) ?>"
+                            required
+                        >
+
+                    </div>
+
+                </div>
+
+
+                <div class="form-row">
+
+                    <div class="form-group">
+
+                        <label>
+                            KRA PIN
+                            <span class="required">*</span>
+                        </label>
+
+                        <input
+                            type="text"
+                            name="officials[<?= e($formKey) ?>][kra_pin]"
+                            maxlength="50"
+                            value="<?= e(
+                                $record[
+                                    'kra_pin'
+                                ]
+                            ) ?>"
+                            required
+                        >
+
+                    </div>
+
+
+                    <div class="form-group">
+
+                        <label>
+                            Phone Number
+                            <span class="required">*</span>
+                        </label>
+
+                        <input
+                            type="tel"
+                            name="officials[<?= e($formKey) ?>][phone_number]"
+                            maxlength="50"
+                            value="<?= e(
+                                $record[
+                                    'phone_number'
+                                ]
+                            ) ?>"
+                            required
+                        >
+
+                    </div>
+
+                </div>
+
+
+                <div class="form-row">
+
+                    <div class="form-group">
+
+                        <label>
+                            Email
+                            <span class="required">*</span>
+                        </label>
+
+                        <input
+                            type="email"
+                            name="officials[<?= e($formKey) ?>][email]"
+                            maxlength="255"
+                            value="<?= e(
+                                $record[
+                                    'email'
+                                ]
+                            ) ?>"
+                            required
+                        >
+
+                    </div>
+
+
+                    <!-- OPTIONAL SIGNATURE -->
+
+                    <div class="form-group">
+
+                        <label>
+                            Signature
+                            <span
+                                style="
+                                    margin-left: 5px;
+                                    color: var(--text-muted);
+                                    font-size: 10px;
+                                    font-weight: 600;
+                                "
+                            >
+                                Optional
+                            </span>
+                        </label>
+
+
+                        <input
+                            type="hidden"
+                            name="officials[<?= e($formKey) ?>][existing_signature]"
+                            value="<?= e(
+                                $existingSignature
+                            ) ?>"
+                        >
+
 
                         <?php if (
-                            !empty(
-                                $chairperson['existing_signature']
-                                ??
-                                $chairperson['signature']
-                                ??
-                                ''
-                            )
+                            $existingSignature !== ''
                         ): ?>
 
-                            Select another file only if the existing
-                            signature should be replaced.
-
-                        <?php else: ?>
-
-                            Upload JPG, PNG, WEBP or PDF.
-                            Maximum file size: 5 MB.
+                            <div
+                                style="
+                                    margin-bottom: 10px;
+                                    padding: 10px 12px;
+                                    background: var(--green-light);
+                                    border: 1px solid #c3dfce;
+                                    border-radius: var(--radius);
+                                    color: var(--green-dark);
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                "
+                            >
+                                &#10003; Signature on file
+                            </div>
 
                         <?php endif; ?>
 
-                    </span>
 
-                </div>
-
-            </div>
-
-        </section>
-
-
-        <!-- ======================================================
-             TREASURER
-             ====================================================== -->
-
-        <section class="application-section">
-
-            <div class="application-section-heading">
-
-                <div class="application-section-number">
-                    2
-                </div>
-
-                <div>
-
-                    <h2>
-                        Treasurer
-                    </h2>
-
-                    <p>
-                        Personal particulars of the Treasurer.
-                    </p>
-
-                </div>
-
-            </div>
-
-
-            <div class="form-group">
-
-                <label for="treasurer_name">
-                    Name
-                    <span class="required">*</span>
-                </label>
-
-                <input
-                    type="text"
-                    id="treasurer_name"
-                    name="officials[treasurer][full_name]"
-                    maxlength="255"
-                    value="<?= e($treasurer['full_name']) ?>"
-                    required
-                >
-
-            </div>
-
-
-            <div class="form-row">
-
-                <div class="form-group">
-
-                    <label for="treasurer_nationality">
-                        Nationality
-                        <span class="required">*</span>
-                    </label>
-
-                    <input
-                        type="text"
-                        id="treasurer_nationality"
-                        name="officials[treasurer][nationality]"
-                        maxlength="100"
-                        value="<?= e($treasurer['nationality']) ?>"
-                        required
-                    >
-
-                </div>
-
-
-                <div class="form-group">
-
-                    <label for="treasurer_id">
-                        ID / Passport Number
-                        <span class="required">*</span>
-                    </label>
-
-                    <input
-                        type="text"
-                        id="treasurer_id"
-                        name="officials[treasurer][id_passport_number]"
-                        maxlength="100"
-                        value="<?= e(
-                            $treasurer['id_passport_number']
-                        ) ?>"
-                        required
-                    >
-
-                </div>
-
-            </div>
-
-
-            <div class="form-row">
-
-                <div class="form-group">
-
-                    <label for="treasurer_kra">
-                        KRA PIN
-                        <span class="required">*</span>
-                    </label>
-
-                    <input
-                        type="text"
-                        id="treasurer_kra"
-                        name="officials[treasurer][kra_pin]"
-                        maxlength="50"
-                        value="<?= e($treasurer['kra_pin']) ?>"
-                        required
-                    >
-
-                </div>
-
-
-                <div class="form-group">
-
-                    <label for="treasurer_phone">
-                        Phone Number
-                        <span class="required">*</span>
-                    </label>
-
-                    <input
-                        type="tel"
-                        id="treasurer_phone"
-                        name="officials[treasurer][phone_number]"
-                        maxlength="50"
-                        value="<?= e(
-                            $treasurer['phone_number']
-                        ) ?>"
-                        required
-                    >
-
-                </div>
-
-            </div>
-
-
-            <div class="form-row">
-
-                <div class="form-group">
-
-                    <label for="treasurer_email">
-                        Email
-                        <span class="required">*</span>
-                    </label>
-
-                    <input
-                        type="email"
-                        id="treasurer_email"
-                        name="officials[treasurer][email]"
-                        maxlength="255"
-                        value="<?= e($treasurer['email']) ?>"
-                        required
-                    >
-
-                </div>
-
-
-                <div class="form-group">
-
-                    <label for="treasurer_signature">
-                        Signature
-                        <span class="required">*</span>
-                    </label>
-
-                    <input
-                        type="hidden"
-                        name="officials[treasurer][existing_signature]"
-                        value="<?= e(
-                            $treasurer['existing_signature']
-                            ??
-                            $treasurer['signature']
-                            ??
-                            ''
-                        ) ?>"
-                    >
-
-
-                    <?php if (
-                        !empty(
-                            $treasurer['existing_signature']
-                            ??
-                            $treasurer['signature']
-                            ??
-                            ''
-                        )
-                    ): ?>
-
-                        <div
-                            style="
-                                margin-bottom: 8px;
-                                padding: 9px 11px;
-                                background: var(--green-light);
-                                border: 1px solid #c3dfce;
-                                border-radius: var(--radius);
-                                color: var(--green-dark);
-                                font-size: 11px;
-                                font-weight: 700;
-                            "
+                        <input
+                            type="file"
+                            name="signatures[<?= e($formKey) ?>]"
+                            accept=".jpg,.jpeg,.png,.webp,.pdf"
                         >
-                            &#10003; Signature already uploaded
-                        </div>
-
-                    <?php endif; ?>
 
 
-                    <input
-                        type="file"
-                        id="treasurer_signature"
-                        name="signatures[treasurer]"
-                        accept=".jpg,.jpeg,.png,.webp,.pdf"
-                        <?= empty(
-                            $treasurer['existing_signature']
-                            ??
-                            $treasurer['signature']
-                            ??
-                            ''
-                        )
-                            ? 'required'
-                            : '' ?>
-                    >
+                        <span class="form-help">
 
-                    <span class="form-help">
+                            <?php if (
+                                $existingSignature !== ''
+                            ): ?>
 
-                        <?php if (
-                            !empty(
-                                $treasurer['existing_signature']
-                                ??
-                                $treasurer['signature']
-                                ??
-                                ''
-                            )
-                        ): ?>
+                                A signature is already on file.
+                                Select another file only to replace it.
 
-                            Select another file only if the existing
-                            signature should be replaced.
+                            <?php else: ?>
 
-                        <?php else: ?>
+                                Optional. Upload JPG, PNG, WEBP or PDF
+                                where a signature is available.
 
-                            Upload JPG, PNG, WEBP or PDF.
-                            Maximum file size: 5 MB.
+                            <?php endif; ?>
 
-                        <?php endif; ?>
+                        </span>
 
-                    </span>
+                    </div>
 
                 </div>
 
-            </div>
+            </section>
 
-        </section>
+        <?php endforeach; ?>
 
 
         <!-- ======================================================
-             SECRETARY
+             OPTIONAL DIRECTORS
              ====================================================== -->
 
         <section class="application-section">
@@ -2678,644 +2344,445 @@ require_once __DIR__ . '/../includes/header.php';
             <div class="application-section-heading">
 
                 <div class="application-section-number">
-                    3
+                    +
                 </div>
 
-                <div>
-
-                    <h2>
-                        Secretary
-                    </h2>
-
-                    <p>
-                        Personal particulars of the Secretary.
-                    </p>
-
-                </div>
-
-            </div>
-
-
-            <div class="form-group">
-
-                <label for="secretary_name">
-                    Name
-                    <span class="required">*</span>
-                </label>
-
-                <input
-                    type="text"
-                    id="secretary_name"
-                    name="officials[secretary][full_name]"
-                    maxlength="255"
-                    value="<?= e($secretary['full_name']) ?>"
-                    required
-                >
-
-            </div>
-
-
-            <div class="form-row">
-
-                <div class="form-group">
-
-                    <label for="secretary_nationality">
-                        Nationality
-                        <span class="required">*</span>
-                    </label>
-
-                    <input
-                        type="text"
-                        id="secretary_nationality"
-                        name="officials[secretary][nationality]"
-                        maxlength="100"
-                        value="<?= e($secretary['nationality']) ?>"
-                        required
-                    >
-
-                </div>
-
-
-                <div class="form-group">
-
-                    <label for="secretary_id">
-                        ID / Passport Number
-                        <span class="required">*</span>
-                    </label>
-
-                    <input
-                        type="text"
-                        id="secretary_id"
-                        name="officials[secretary][id_passport_number]"
-                        maxlength="100"
-                        value="<?= e(
-                            $secretary['id_passport_number']
-                        ) ?>"
-                        required
-                    >
-
-                </div>
-
-            </div>
-
-
-            <div class="form-row">
-
-                <div class="form-group">
-
-                    <label for="secretary_kra">
-                        KRA PIN
-                        <span class="required">*</span>
-                    </label>
-
-                    <input
-                        type="text"
-                        id="secretary_kra"
-                        name="officials[secretary][kra_pin]"
-                        maxlength="50"
-                        value="<?= e($secretary['kra_pin']) ?>"
-                        required
-                    >
-
-                </div>
-
-
-                <div class="form-group">
-
-                    <label for="secretary_phone">
-                        Phone Number
-                        <span class="required">*</span>
-                    </label>
-
-                    <input
-                        type="tel"
-                        id="secretary_phone"
-                        name="officials[secretary][phone_number]"
-                        maxlength="50"
-                        value="<?= e(
-                            $secretary['phone_number']
-                        ) ?>"
-                        required
-                    >
-
-                </div>
-
-            </div>
-
-
-            <div class="form-row">
-
-                <div class="form-group">
-
-                    <label for="secretary_email">
-                        Email
-                        <span class="required">*</span>
-                    </label>
-
-                    <input
-                        type="email"
-                        id="secretary_email"
-                        name="officials[secretary][email]"
-                        maxlength="255"
-                        value="<?= e($secretary['email']) ?>"
-                        required
-                    >
-
-                </div>
-
-
-                <div class="form-group">
-
-                    <label for="secretary_signature">
-                        Signature
-                        <span class="required">*</span>
-                    </label>
-
-                    <input
-                        type="hidden"
-                        name="officials[secretary][existing_signature]"
-                        value="<?= e(
-                            $secretary['existing_signature']
-                            ??
-                            $secretary['signature']
-                            ??
-                            ''
-                        ) ?>"
-                    >
-
-
-                    <?php if (
-                        !empty(
-                            $secretary['existing_signature']
-                            ??
-                            $secretary['signature']
-                            ??
-                            ''
-                        )
-                    ): ?>
-
-                        <div
-                            style="
-                                margin-bottom: 8px;
-                                padding: 9px 11px;
-                                background: var(--green-light);
-                                border: 1px solid #c3dfce;
-                                border-radius: var(--radius);
-                                color: var(--green-dark);
-                                font-size: 11px;
-                                font-weight: 700;
-                            "
-                        >
-                            &#10003; Signature already uploaded
-                        </div>
-
-                    <?php endif; ?>
-
-
-                    <input
-                        type="file"
-                        id="secretary_signature"
-                        name="signatures[secretary]"
-                        accept=".jpg,.jpeg,.png,.webp,.pdf"
-                        <?= empty(
-                            $secretary['existing_signature']
-                            ??
-                            $secretary['signature']
-                            ??
-                            ''
-                        )
-                            ? 'required'
-                            : '' ?>
-                    >
-
-                    <span class="form-help">
-
-                        <?php if (
-                            !empty(
-                                $secretary['existing_signature']
-                                ??
-                                $secretary['signature']
-                                ??
-                                ''
-                            )
-                        ): ?>
-
-                            Select another file only if the existing
-                            signature should be replaced.
-
-                        <?php else: ?>
-
-                            Upload JPG, PNG, WEBP or PDF.
-                            Maximum file size: 5 MB.
-
-                        <?php endif; ?>
-
-                    </span>
-
-                </div>
-
-            </div>
-
-        </section>
-
-
-        <!-- ======================================================
-             ADDITIONAL DIRECTORS
-             ====================================================== -->
-
-        <section class="application-section">
-
-            <div class="application-section-heading">
-
-                <div class="application-section-number">
-                    4+
-                </div>
-
-                <div>
+                <div style="flex: 1;">
 
                     <h2>
                         Additional Directors
                     </h2>
 
                     <p>
-                        Enter the personal particulars of the
-                        organization's additional Directors.
+                        Optional — add Director particulars only where applicable.
                     </p>
+
+                </div>
+
+
+                <span
+                    style="
+                        padding: 5px 9px;
+                        background: var(--soft-bg);
+                        border: 1px solid var(--border);
+                        border-radius: 20px;
+                        color: var(--text-muted);
+                        font-size: 10px;
+                        font-weight: 800;
+                        letter-spacing: .4px;
+                        text-transform: uppercase;
+                    "
+                >
+                    Optional
+                </span>
+
+            </div>
+
+
+            <div
+                style="
+                    padding: 17px 18px;
+                    background:
+                        linear-gradient(
+                            100deg,
+                            var(--blue-light),
+                            #ffffff
+                        );
+                    border: 1px solid #d2e0ec;
+                    border-radius: var(--radius);
+                "
+            >
+
+                <div
+                    style="
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        gap: 15px;
+                        flex-wrap: wrap;
+                    "
+                >
+
+                    <div>
+
+                        <strong
+                            style="
+                                display: block;
+                                margin-bottom: 3px;
+                                color: var(--blue-dark);
+                            "
+                        >
+                            Director Information
+                        </strong>
+
+                        <span
+                            id="director-summary"
+                            style="
+                                color: var(--text-secondary);
+                                font-size: 11px;
+                            "
+                        >
+                            No additional directors recorded.
+                        </span>
+
+                    </div>
+
+
+                    <button
+                        type="button"
+                        class="btn btn-secondary"
+                        id="toggle-directors"
+                        aria-expanded="<?= $directors !== []
+                            ? 'true'
+                            : 'false' ?>"
+                    >
+                        <?= $directors !== []
+                            ? 'Hide Directors'
+                            : 'Add / View Directors' ?>
+                    </button>
 
                 </div>
 
             </div>
 
 
-            <div class="admin-info">
+            <!-- Collapsible Director area -->
 
-                At least <strong>two additional Directors</strong>
-                should be captured.
+            <div
+                id="directors-panel"
+                style="
+                    margin-top: 18px;
+                    <?= $directors === []
+                        ? 'display: none;'
+                        : '' ?>
+                "
+            >
 
-                Use <strong>Add Another Director</strong> where the
-                organization has more Directors.
-
-            </div>
-
-
-            <div id="directors-container">
-
-                <?php foreach (
-                    $directors
-                    as $index => $director
-                ): ?>
-
-                    <?php
-
-                    $storedDirectorSignature =
-                        (string) (
-                            $director['existing_signature']
-                            ??
-                            $director['signature']
-                            ??
-                            ''
-                        );
-
-                    ?>
+                <div
+                    class="admin-info"
+                    style="margin-bottom: 15px;"
+                >
+                    Directors are optional. Add only those applicable to
+                    this organization. Director signatures are also optional.
+                </div>
 
 
-                    <article
-                        data-director-card
-                        class="director-card"
-                        style="
-                            margin-bottom: 22px;
-                            overflow: hidden;
-                            background: var(--white);
-                            border: 1px solid var(--border);
-                            border-radius: var(--radius);
-                            box-shadow: var(--shadow-sm);
-                        "
-                    >
+                <div id="directors-container">
 
+                    <?php foreach (
+                        $directors
+                        as $index => $director
+                    ): ?>
 
-                        <!-- DIRECTOR HEADER -->
+                        <?php
 
-                        <div
+                        $directorSignature =
+                            (string)
+                            (
+                                $director[
+                                    'existing_signature'
+                                ]
+                                ??
+                                $director[
+                                    'signature'
+                                ]
+                                ??
+                                ''
+                            );
+
+                        ?>
+
+                        <article
+                            data-director-card
+                            class="director-card"
                             style="
-                                display: flex;
-                                align-items: center;
-                                justify-content: space-between;
-                                gap: 15px;
-                                padding: 15px 18px;
-                                background:
-                                    linear-gradient(
-                                        100deg,
-                                        var(--blue-light),                                        #ffffff
-                                    );
-                                border-bottom: 1px solid var(--border);
+                                margin-bottom: 18px;
+                                overflow: hidden;
+                                background: var(--white);
+                                border: 1px solid var(--border);
+                                border-radius: var(--radius);
+                                box-shadow: var(--shadow-sm);
                             "
                         >
 
-                            <div>
-
-                                <span class="section-eyebrow">
-                                    Additional Director
-                                </span>
-
-                                <h3
-                                    data-director-title
-                                    style="
-                                        margin: 0;
-                                        color: var(--blue-dark);
-                                    "
-                                >
-                                    Director <?= $index + 1 ?>
-                                </h3>
-
-                            </div>
-
-
-                            <button
-                                type="button"
-                                class="btn btn-danger btn-sm"
-                                data-remove-director
-                                <?= $index < 2
-                                    ? 'style="display:none;"'
-                                    : '' ?>
+                            <div
+                                style="
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: space-between;
+                                    gap: 15px;
+                                    padding: 14px 17px;
+                                    background:
+                                        linear-gradient(
+                                            100deg,
+                                            var(--blue-light),
+                                            #ffffff
+                                        );
+                                    border-bottom: 1px solid var(--border);
+                                "
                             >
-                                Remove
-                            </button>
 
-                        </div>
+                                <div>
+
+                                    <span class="section-eyebrow">
+                                        Optional Director
+                                    </span>
+
+                                    <h3
+                                        data-director-title
+                                        style="
+                                            margin: 0;
+                                            color: var(--blue-dark);
+                                        "
+                                    >
+                                        Director <?= $index + 1 ?>
+                                    </h3>
+
+                                </div>
 
 
-                        <!-- DIRECTOR BODY -->
-
-                        <div style="padding: 20px;">
-
-
-                            <!-- NAME -->
-
-                            <div class="form-group">
-
-                                <label>
-                                    Name
-                                    <span class="required">*</span>
-                                </label>
-
-                                <input
-                                    type="text"
-                                    name="directors[<?= $index ?>][full_name]"
-                                    maxlength="255"
-                                    value="<?= e(
-                                        $director['full_name']
-                                    ) ?>"
-                                    data-director-field
-                                    data-field-name="full_name"
-                                    required
+                                <button
+                                    type="button"
+                                    class="btn btn-danger btn-sm"
+                                    data-remove-director
                                 >
+                                    Remove
+                                </button>
 
                             </div>
 
 
-                            <!-- NATIONALITY / ID -->
-
-                            <div class="form-row">
+                            <div style="padding: 20px;">
 
                                 <div class="form-group">
 
                                     <label>
-                                        Nationality
-                                        <span class="required">*</span>
+                                        Name
                                     </label>
 
                                     <input
                                         type="text"
-                                        name="directors[<?= $index ?>][nationality]"
-                                        maxlength="100"
-                                        value="<?= e(
-                                            $director['nationality']
-                                        ) ?>"
-                                        data-director-field
-                                        data-field-name="nationality"
-                                        required
-                                    >
-
-                                </div>
-
-
-                                <div class="form-group">
-
-                                    <label>
-                                        ID / Passport Number
-                                        <span class="required">*</span>
-                                    </label>
-
-                                    <input
-                                        type="text"
-                                        name="directors[<?= $index ?>][id_passport_number]"
-                                        maxlength="100"
-                                        value="<?= e(
-                                            $director['id_passport_number']
-                                        ) ?>"
-                                        data-director-field
-                                        data-field-name="id_passport_number"
-                                        required
-                                    >
-
-                                </div>
-
-                            </div>
-
-
-                            <!-- KRA PIN / PHONE -->
-
-                            <div class="form-row">
-
-                                <div class="form-group">
-
-                                    <label>
-                                        KRA PIN
-                                        <span class="required">*</span>
-                                    </label>
-
-                                    <input
-                                        type="text"
-                                        name="directors[<?= $index ?>][kra_pin]"
-                                        maxlength="50"
-                                        value="<?= e(
-                                            $director['kra_pin']
-                                        ) ?>"
-                                        data-director-field
-                                        data-field-name="kra_pin"
-                                        required
-                                    >
-
-                                </div>
-
-
-                                <div class="form-group">
-
-                                    <label>
-                                        Phone Number
-                                        <span class="required">*</span>
-                                    </label>
-
-                                    <input
-                                        type="tel"
-                                        name="directors[<?= $index ?>][phone_number]"
-                                        maxlength="50"
-                                        value="<?= e(
-                                            $director['phone_number']
-                                        ) ?>"
-                                        data-director-field
-                                        data-field-name="phone_number"
-                                        required
-                                    >
-
-                                </div>
-
-                            </div>
-
-
-                            <!-- EMAIL / SIGNATURE -->
-
-                            <div class="form-row">
-
-                                <div class="form-group">
-
-                                    <label>
-                                        Email
-                                        <span class="required">*</span>
-                                    </label>
-
-                                    <input
-                                        type="email"
-                                        name="directors[<?= $index ?>][email]"
+                                        name="directors[<?= $index ?>][full_name]"
                                         maxlength="255"
                                         value="<?= e(
-                                            $director['email']
+                                            $director[
+                                                'full_name'
+                                            ]
                                         ) ?>"
                                         data-director-field
-                                        data-field-name="email"
-                                        required
+                                        data-field-name="full_name"
                                     >
 
                                 </div>
 
 
-                                <div class="form-group">
+                                <div class="form-row">
 
-                                    <label>
-                                        Signature
-                                        <span class="required">*</span>
-                                    </label>
+                                    <div class="form-group">
 
+                                        <label>
+                                            Nationality
+                                        </label>
 
-                                    <!--
-                                        Preserve an already uploaded signature.
-
-                                        This is particularly important when
-                                        another field fails validation.
-                                    -->
-
-                                    <input
-                                        type="hidden"
-                                        name="directors[<?= $index ?>][existing_signature]"
-                                        value="<?= e(
-                                            $storedDirectorSignature
-                                        ) ?>"
-                                        data-director-field
-                                        data-field-name="existing_signature"
-                                    >
-
-
-                                    <?php if (
-                                        $storedDirectorSignature !== ''
-                                    ): ?>
-
-                                        <div
-                                            style="
-                                                margin-bottom: 8px;
-                                                padding: 9px 11px;
-                                                background: var(--green-light);
-                                                border: 1px solid #c3dfce;
-                                                border-radius: var(--radius);
-                                                color: var(--green-dark);
-                                                font-size: 11px;
-                                                font-weight: 700;
-                                            "
+                                        <input
+                                            type="text"
+                                            name="directors[<?= $index ?>][nationality]"
+                                            maxlength="100"
+                                            value="<?= e(
+                                                $director[
+                                                    'nationality'
+                                                ]
+                                            ) ?>"
+                                            data-director-field
+                                            data-field-name="nationality"
                                         >
-                                            &#10003; Signature already uploaded
-                                        </div>
 
-                                    <?php endif; ?>
+                                    </div>
 
 
-                                    <input
-                                        type="file"
-                                        name="director_signatures[<?= $index ?>]"
-                                        accept=".jpg,.jpeg,.png,.webp,.pdf"
-                                        data-director-signature
-                                        <?= $storedDirectorSignature === ''
-                                            ? 'required'
-                                            : '' ?>
-                                    >
+                                    <div class="form-group">
+
+                                        <label>
+                                            ID / Passport Number
+                                        </label>
+
+                                        <input
+                                            type="text"
+                                            name="directors[<?= $index ?>][id_passport_number]"
+                                            maxlength="100"
+                                            value="<?= e(
+                                                $director[
+                                                    'id_passport_number'
+                                                ]
+                                            ) ?>"
+                                            data-director-field
+                                            data-field-name="id_passport_number"
+                                        >
+
+                                    </div>
+
+                                </div>
 
 
-                                    <span class="form-help">
+                                <div class="form-row">
+
+                                    <div class="form-group">
+
+                                        <label>
+                                            KRA PIN
+                                        </label>
+
+                                        <input
+                                            type="text"
+                                            name="directors[<?= $index ?>][kra_pin]"
+                                            maxlength="50"
+                                            value="<?= e(
+                                                $director[
+                                                    'kra_pin'
+                                                ]
+                                            ) ?>"
+                                            data-director-field
+                                            data-field-name="kra_pin"
+                                        >
+
+                                    </div>
+
+
+                                    <div class="form-group">
+
+                                        <label>
+                                            Phone Number
+                                        </label>
+
+                                        <input
+                                            type="tel"
+                                            name="directors[<?= $index ?>][phone_number]"
+                                            maxlength="50"
+                                            value="<?= e(
+                                                $director[
+                                                    'phone_number'
+                                                ]
+                                            ) ?>"
+                                            data-director-field
+                                            data-field-name="phone_number"
+                                        >
+
+                                    </div>
+
+                                </div>
+
+
+                                <div class="form-row">
+
+                                    <div class="form-group">
+
+                                        <label>
+                                            Email
+                                        </label>
+
+                                        <input
+                                            type="email"
+                                            name="directors[<?= $index ?>][email]"
+                                            maxlength="255"
+                                            value="<?= e(
+                                                $director[
+                                                    'email'
+                                                ]
+                                            ) ?>"
+                                            data-director-field
+                                            data-field-name="email"
+                                        >
+
+                                    </div>
+
+
+                                    <div class="form-group">
+
+                                        <label>
+                                            Signature
+                                            <span
+                                                style="
+                                                    margin-left: 5px;
+                                                    color: var(--text-muted);
+                                                    font-size: 10px;
+                                                "
+                                            >
+                                                Optional
+                                            </span>
+                                        </label>
+
+
+                                        <input
+                                            type="hidden"
+                                            name="directors[<?= $index ?>][existing_signature]"
+                                            value="<?= e(
+                                                $directorSignature
+                                            ) ?>"
+                                            data-director-field
+                                            data-field-name="existing_signature"
+                                        >
+
 
                                         <?php if (
-                                            $storedDirectorSignature !== ''
+                                            $directorSignature !== ''
                                         ): ?>
 
-                                            Select another file only if
-                                            the existing signature should
-                                            be replaced.
-
-                                        <?php else: ?>
-
-                                            Upload JPG, PNG, WEBP or PDF.
-                                            Maximum file size: 5 MB.
+                                            <div
+                                                style="
+                                                    margin-bottom: 8px;
+                                                    padding: 9px 11px;
+                                                    background: var(--green-light);
+                                                    border: 1px solid #c3dfce;
+                                                    border-radius: var(--radius);
+                                                    color: var(--green-dark);
+                                                    font-size: 11px;
+                                                    font-weight: 700;
+                                                "
+                                            >
+                                                &#10003; Signature on file
+                                            </div>
 
                                         <?php endif; ?>
 
-                                    </span>
+
+                                        <input
+                                            type="file"
+                                            name="director_signatures[<?= $index ?>]"
+                                            accept=".jpg,.jpeg,.png,.webp,.pdf"
+                                            data-director-signature
+                                        >
+
+                                        <span class="form-help">
+                                            Optional. JPG, PNG, WEBP or PDF,
+                                            maximum 5 MB.
+                                        </span>
+
+                                    </div>
 
                                 </div>
 
                             </div>
 
-                        </div>
+                        </article>
 
-                    </article>
+                    <?php endforeach; ?>
 
-                <?php endforeach; ?>
+                </div>
 
-            </div>
-
-
-            <!-- ==================================================
-                 ADD DIRECTOR
-                 ================================================== -->
-
-            <div
-                style="
-                    display: flex;
-                    align-items: center;
-                    gap: 12px;
-                    flex-wrap: wrap;
-                    margin-top: 5px;
-                "
-            >
 
                 <button
                     type="button"
                     class="btn btn-secondary"
                     id="add-director"
                 >
-                    + Add Another Director
+                    + Add Director
                 </button>
 
 
                 <span
                     id="director-count"
                     style="
+                        margin-left: 10px;
                         color: var(--text-muted);
                         font-size: 11px;
                     "
@@ -3336,7 +2803,8 @@ require_once __DIR__ . '/../includes/header.php';
 
                 <a
                     href="/pbo-portal/applications/financial-year.php?id=<?= urlencode(
-                        (string) $applicationId
+                        (string)
+                        $applicationId
                     ) ?>"
                     class="btn btn-secondary"
                 >
@@ -3357,20 +2825,17 @@ require_once __DIR__ . '/../includes/header.php';
                     Step 5 of 6
                 </span>
 
-
                 <button
                     type="submit"
                     class="btn btn-primary"
                     id="save-officials-button"
-                    <?= $directoryError !== null
-                        ? 'disabled'
-                        : '' ?>
                 >
                     Save &amp; Continue
 
                     <span aria-hidden="true">
                         &rarr;
                     </span>
+
                 </button>
 
             </div>
@@ -3383,7 +2848,7 @@ require_once __DIR__ . '/../includes/header.php';
 
 
 <!-- ==============================================================
-     NEW DIRECTOR TEMPLATE
+     OPTIONAL DIRECTOR TEMPLATE
      ============================================================== -->
 
 <template id="director-template">
@@ -3392,7 +2857,7 @@ require_once __DIR__ . '/../includes/header.php';
         data-director-card
         class="director-card"
         style="
-            margin-bottom: 22px;
+            margin-bottom: 18px;
             overflow: hidden;
             background: var(--white);
             border: 1px solid var(--border);
@@ -3401,15 +2866,13 @@ require_once __DIR__ . '/../includes/header.php';
         "
     >
 
-        <!-- HEADER -->
-
         <div
             style="
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
                 gap: 15px;
-                padding: 15px 18px;
+                padding: 14px 17px;
                 background:
                     linear-gradient(
                         100deg,
@@ -3423,7 +2886,7 @@ require_once __DIR__ . '/../includes/header.php';
             <div>
 
                 <span class="section-eyebrow">
-                    Additional Director
+                    Optional Director
                 </span>
 
                 <h3
@@ -3450,16 +2913,12 @@ require_once __DIR__ . '/../includes/header.php';
         </div>
 
 
-        <!-- BODY -->
-
         <div style="padding: 20px;">
-
 
             <div class="form-group">
 
                 <label>
                     Name
-                    <span class="required">*</span>
                 </label>
 
                 <input
@@ -3467,7 +2926,6 @@ require_once __DIR__ . '/../includes/header.php';
                     data-director-field
                     data-field-name="full_name"
                     maxlength="255"
-                    required
                 >
 
             </div>
@@ -3479,7 +2937,6 @@ require_once __DIR__ . '/../includes/header.php';
 
                     <label>
                         Nationality
-                        <span class="required">*</span>
                     </label>
 
                     <input
@@ -3487,7 +2944,6 @@ require_once __DIR__ . '/../includes/header.php';
                         data-director-field
                         data-field-name="nationality"
                         maxlength="100"
-                        required
                     >
 
                 </div>
@@ -3497,7 +2953,6 @@ require_once __DIR__ . '/../includes/header.php';
 
                     <label>
                         ID / Passport Number
-                        <span class="required">*</span>
                     </label>
 
                     <input
@@ -3505,7 +2960,6 @@ require_once __DIR__ . '/../includes/header.php';
                         data-director-field
                         data-field-name="id_passport_number"
                         maxlength="100"
-                        required
                     >
 
                 </div>
@@ -3519,7 +2973,6 @@ require_once __DIR__ . '/../includes/header.php';
 
                     <label>
                         KRA PIN
-                        <span class="required">*</span>
                     </label>
 
                     <input
@@ -3527,7 +2980,6 @@ require_once __DIR__ . '/../includes/header.php';
                         data-director-field
                         data-field-name="kra_pin"
                         maxlength="50"
-                        required
                     >
 
                 </div>
@@ -3537,7 +2989,6 @@ require_once __DIR__ . '/../includes/header.php';
 
                     <label>
                         Phone Number
-                        <span class="required">*</span>
                     </label>
 
                     <input
@@ -3545,7 +2996,6 @@ require_once __DIR__ . '/../includes/header.php';
                         data-director-field
                         data-field-name="phone_number"
                         maxlength="50"
-                        required
                     >
 
                 </div>
@@ -3559,7 +3009,6 @@ require_once __DIR__ . '/../includes/header.php';
 
                     <label>
                         Email
-                        <span class="required">*</span>
                     </label>
 
                     <input
@@ -3567,7 +3016,6 @@ require_once __DIR__ . '/../includes/header.php';
                         data-director-field
                         data-field-name="email"
                         maxlength="255"
-                        required
                     >
 
                 </div>
@@ -3577,7 +3025,15 @@ require_once __DIR__ . '/../includes/header.php';
 
                     <label>
                         Signature
-                        <span class="required">*</span>
+                        <span
+                            style="
+                                margin-left: 5px;
+                                color: var(--text-muted);
+                                font-size: 10px;
+                            "
+                        >
+                            Optional
+                        </span>
                     </label>
 
 
@@ -3593,12 +3049,11 @@ require_once __DIR__ . '/../includes/header.php';
                         type="file"
                         data-director-signature
                         accept=".jpg,.jpeg,.png,.webp,.pdf"
-                        required
                     >
 
                     <span class="form-help">
-                        Upload JPG, PNG, WEBP or PDF.
-                        Maximum file size: 5 MB.
+                        Optional. JPG, PNG, WEBP or PDF,
+                        maximum 5 MB.
                     </span>
 
                 </div>
@@ -3612,80 +3067,64 @@ require_once __DIR__ . '/../includes/header.php';
 </template>
 
 
-<!-- ==============================================================
-     DIRECTOR + UPLOAD JAVASCRIPT
-     ============================================================== -->
-
 <script>
 (function () {
 
     'use strict';
 
 
-    /*
-    |--------------------------------------------------------------------------
-    | Elements
-    |--------------------------------------------------------------------------
-    */
-
     const form =
         document.getElementById(
             'officials-form'
         );
 
+    const directorsPanel =
+        document.getElementById(
+            'directors-panel'
+        );
 
     const directorsContainer =
         document.getElementById(
             'directors-container'
         );
 
-
     const directorTemplate =
         document.getElementById(
             'director-template'
         );
 
+    const toggleDirectorsButton =
+        document.getElementById(
+            'toggle-directors'
+        );
 
     const addDirectorButton =
         document.getElementById(
             'add-director'
         );
 
-
     const directorCount =
         document.getElementById(
             'director-count'
         );
 
+    const directorSummary =
+        document.getElementById(
+            'director-summary'
+        );
 
     const saveButton =
         document.getElementById(
             'save-officials-button'
         );
 
-
-    /*
-    |--------------------------------------------------------------------------
-    | Safety limit
-    |--------------------------------------------------------------------------
-    */
-
-    const MAX_ADDITIONAL_DIRECTORS = 30;
+    const MAX_DIRECTORS = 30;
 
 
     /*
     |--------------------------------------------------------------------------
-    | Reindex Director fields
+    | Reindex optional Directors
     |--------------------------------------------------------------------------
-    |
-    | PHP needs contiguous arrays:
-    |
-    | directors[0][full_name]
-    | directors[1][full_name]
-    |
-    | director_signatures[0]
-    | director_signatures[1]
-    |
     */
 
     function reindexDirectors() {
@@ -3694,14 +3133,13 @@ require_once __DIR__ . '/../includes/header.php';
             directorsContainer.querySelectorAll(
                 '[data-director-card]'
             );
-
-
-        cards.forEach(
+                    cards.forEach(
             function (card, index) {
 
-
                 /*
-                | Heading
+                |--------------------------------------------------------------------------
+                | Director title
+                |--------------------------------------------------------------------------
                 */
 
                 const title =
@@ -3709,18 +3147,18 @@ require_once __DIR__ . '/../includes/header.php';
                         '[data-director-title]'
                     );
 
-
                 if (title) {
 
                     title.textContent =
                         'Director ' +
                         (index + 1);
-
                 }
 
 
                 /*
-                | Text + hidden fields
+                |--------------------------------------------------------------------------
+                | Reindex text/hidden fields
+                |--------------------------------------------------------------------------
                 */
 
                 const fields =
@@ -3751,13 +3189,14 @@ require_once __DIR__ . '/../includes/header.php';
                             fieldName +
                             ']'
                         );
-
                     }
                 );
 
 
                 /*
-                | Signature upload
+                |--------------------------------------------------------------------------
+                | Reindex optional signature
+                |--------------------------------------------------------------------------
                 */
 
                 const signature =
@@ -3774,68 +3213,105 @@ require_once __DIR__ . '/../includes/header.php';
                         index +
                         ']'
                     );
-
                 }
-
-
-                /*
-                | First two Director cards cannot be removed.
-                */
-
-                const removeButton =
-                    card.querySelector(
-                        '[data-remove-director]'
-                    );
-
-
-                if (removeButton) {
-
-                    removeButton.style.display =
-                        index < 2
-                            ? 'none'
-                            : '';
-
-                }
-
             }
         );
 
 
         /*
-        | Display total.
+        |--------------------------------------------------------------------------
+        | Director count
+        |--------------------------------------------------------------------------
         */
 
-        const additionalCount =
+        const count =
             cards.length;
 
 
-        const totalPeople =
-            3 +
-            additionalCount;
-
-
         directorCount.textContent =
-            additionalCount +
-            ' additional director' +
-            (
-                additionalCount === 1
-                    ? ''
-                    : 's'
-            ) +
-            ' — ' +
-            totalPeople +
-            ' officials/directors in total';
+            count === 0
+                ? 'No directors added'
+                : count +
+                  ' director' +
+                  (
+                      count === 1
+                          ? ''
+                          : 's'
+                  ) +
+                  ' added';
+
+
+        directorSummary.textContent =
+            count === 0
+                ? 'No additional directors recorded.'
+                : count +
+                  ' optional director' +
+                  (
+                      count === 1
+                          ? ''
+                          : 's'
+                  ) +
+                  ' currently recorded.';
 
 
         /*
-        | Add limit.
+        |--------------------------------------------------------------------------
+        | Add limit
+        |--------------------------------------------------------------------------
         */
 
         addDirectorButton.disabled =
-            additionalCount >=
-            MAX_ADDITIONAL_DIRECTORS;
-
+            count >=
+            MAX_DIRECTORS;
     }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Expand / collapse Directors
+    |--------------------------------------------------------------------------
+    */
+
+    function setDirectorsExpanded(
+        expanded
+    ) {
+
+        directorsPanel.style.display =
+            expanded
+                ? ''
+                : 'none';
+
+
+        toggleDirectorsButton.setAttribute(
+            'aria-expanded',
+            expanded
+                ? 'true'
+                : 'false'
+        );
+
+
+        toggleDirectorsButton.textContent =
+            expanded
+                ? 'Hide Directors'
+                : 'Add / View Directors';
+    }
+
+
+    toggleDirectorsButton.addEventListener(
+        'click',
+        function () {
+
+            const expanded =
+                this.getAttribute(
+                    'aria-expanded'
+                ) === 'true';
+
+
+            setDirectorsExpanded(
+                !expanded
+            );
+        }
+    );
 
 
     /*
@@ -3856,8 +3332,9 @@ require_once __DIR__ . '/../includes/header.php';
 
             if (
                 existingCount >=
-                MAX_ADDITIONAL_DIRECTORS
+                MAX_DIRECTORS
             ) {
+
                 return;
             }
 
@@ -3877,7 +3354,20 @@ require_once __DIR__ . '/../includes/header.php';
 
 
             /*
-            | Focus new Director name.
+            |--------------------------------------------------------------------------
+            | Ensure panel remains open
+            |--------------------------------------------------------------------------
+            */
+
+            setDirectorsExpanded(
+                true
+            );
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Focus new Director
+            |--------------------------------------------------------------------------
             */
 
             const cards =
@@ -3901,10 +3391,10 @@ require_once __DIR__ . '/../includes/header.php';
 
 
                 if (nameInput) {
+
                     nameInput.focus();
                 }
             }
-
         }
     );
 
@@ -3913,6 +3403,9 @@ require_once __DIR__ . '/../includes/header.php';
     |--------------------------------------------------------------------------
     | Remove Director
     |--------------------------------------------------------------------------
+    |
+    | Unlike the old implementation, there is NO minimum Director count.
+    |
     */
 
     directorsContainer.addEventListener(
@@ -3941,40 +3434,42 @@ require_once __DIR__ . '/../includes/header.php';
             }
 
 
-            const cards =
-                directorsContainer.querySelectorAll(
-                    '[data-director-card]'
-                );
-
-
-            /*
-            | Never go below two.
-            */
-
-            if (cards.length <= 2) {
-
-                alert(
-                    'At least two additional Directors must remain.'
-                );
-
-                return;
-            }
-
-
             card.remove();
 
             reindexDirectors();
 
+
+            /*
+            |--------------------------------------------------------------------------
+            | Collapse automatically if none remain
+            |--------------------------------------------------------------------------
+            */
+
+            const remaining =
+                directorsContainer.querySelectorAll(
+                    '[data-director-card]'
+                ).length;
+
+
+            if (remaining === 0) {
+
+                setDirectorsExpanded(
+                    false
+                );
+            }
         }
     );
 
 
     /*
     |--------------------------------------------------------------------------
-    | Client-side file validation
+    | Client-side signature validation
     |--------------------------------------------------------------------------
     |
-    | PHP performs the authoritative validation.
+    | Signature itself is optional.
+    |
+    | If a file IS selected, validate its size/type for user feedback.
+    | PHP remains authoritative.
     |
     */
 
@@ -3987,9 +3482,13 @@ require_once __DIR__ . '/../includes/header.php';
 
 
             if (
-                !(input instanceof HTMLInputElement) ||
+                !(
+                    input instanceof
+                    HTMLInputElement
+                ) ||
                 input.type !== 'file'
             ) {
+
                 return;
             }
 
@@ -3998,6 +3497,7 @@ require_once __DIR__ . '/../includes/header.php';
                 !input.files ||
                 input.files.length === 0
             ) {
+
                 return;
             }
 
@@ -4026,16 +3526,22 @@ require_once __DIR__ . '/../includes/header.php';
 
 
             const allowedMimeTypes = [
+
                 'image/jpeg',
+
                 'image/png',
+
                 'image/webp',
+
                 'application/pdf'
             ];
 
 
             /*
-            | Some browsers may provide an empty MIME type.
-            | Server-side finfo still performs the final check.
+            |--------------------------------------------------------------------------
+            | Some browsers provide an empty MIME type.
+            | Server-side finfo performs the final check.
+            |--------------------------------------------------------------------------
             */
 
             if (
@@ -4051,23 +3557,13 @@ require_once __DIR__ . '/../includes/header.php';
 
                 input.value = '';
             }
-
         }
     );
 
 
     /*
     |--------------------------------------------------------------------------
-    | Initial state
-    |--------------------------------------------------------------------------
-    */
-
-    reindexDirectors();
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Submit
+    | Normal Save & Continue
     |--------------------------------------------------------------------------
     */
 
@@ -4075,38 +3571,39 @@ require_once __DIR__ . '/../includes/header.php';
         'submit',
         function (event) {
 
-
-            /*
-            | Reindex one final time.
-            */
-
             reindexDirectors();
 
 
             /*
-            | Minimum two Directors.
+            |--------------------------------------------------------------------------
+            | Wizard navigation deliberately bypasses normal browser validation.
+            |--------------------------------------------------------------------------
             */
 
-            const cards =
-                directorsContainer.querySelectorAll(
-                    '[data-director-card]'
+            const formAction =
+                document.getElementById(
+                    'form_action'
                 );
 
 
-            if (cards.length < 2) {
-
-                event.preventDefault();
-
-                alert(
-                    'Please enter at least two additional Directors.'
-                );
+            if (
+                formAction &&
+                formAction.value ===
+                    'wizard_navigation'
+            ) {
 
                 return;
             }
 
 
             /*
-            | Native validation.
+            |--------------------------------------------------------------------------
+            | Only principal officials have HTML required fields.
+            |
+            | Directors have no HTML required attributes because Directors
+            | themselves are optional. PHP validates a Director only when
+            | one has actually been entered.
+            |--------------------------------------------------------------------------
             */
 
             if (!form.checkValidity()) {
@@ -4120,27 +3617,138 @@ require_once __DIR__ . '/../includes/header.php';
 
 
             /*
-            | Do NOT clear any fields here.
-            |
-            | The browser posts the complete form and PHP repopulates
-            | all entered values if server-side validation fails.
-            */
-
-
-            /*
-            | Prevent duplicate submission.
+            |--------------------------------------------------------------------------
+            | Prevent duplicate submission
+            |--------------------------------------------------------------------------
             */
 
             if (saveButton) {
 
-                saveButton.disabled = true;
+                saveButton.disabled =
+                    true;
 
                 saveButton.innerHTML =
                     'Saving...';
-
             }
-
         }
+    );
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Wizard navigation
+    |--------------------------------------------------------------------------
+    |
+    | Save partial Officials data before moving to another wizard page.
+    |
+    */
+
+    const wizardLinks =
+        document.querySelectorAll(
+            '[data-wizard-link="true"]'
+        );
+
+
+    wizardLinks.forEach(
+        function (link) {
+
+            link.addEventListener(
+                'click',
+                function (event) {
+
+                    const destination =
+                        this.getAttribute(
+                            'data-wizard-step'
+                        );
+
+
+                    /*
+                    |--------------------------------------------------------------------------
+                    | Already on Officials
+                    |--------------------------------------------------------------------------
+                    */
+
+                    if (destination === '5') {
+
+                        return;
+                    }
+
+
+                    event.preventDefault();
+
+
+                    const formAction =
+                        document.getElementById(
+                            'form_action'
+                        );
+
+
+                    const wizardDestination =
+                        document.getElementById(
+                            'wizard_destination'
+                        );
+
+
+                    if (
+                        !formAction ||
+                        !wizardDestination
+                    ) {
+
+                        return;
+                    }
+
+
+                    /*
+                    |--------------------------------------------------------------------------
+                    | Ensure dynamically-added Director fields have correct names.
+                    |--------------------------------------------------------------------------
+                    */
+
+                    reindexDirectors();
+
+
+                    formAction.value =
+                        'wizard_navigation';
+
+
+                    wizardDestination.value =
+                        destination;
+
+
+                    /*
+                    |--------------------------------------------------------------------------
+                    | Partial draft navigation bypasses browser required fields.
+                    |--------------------------------------------------------------------------
+                    */
+
+                    form.noValidate =
+                        true;
+
+
+                    form.submit();
+                }
+            );
+        }
+    );
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Initial state
+    |--------------------------------------------------------------------------
+    */
+
+    reindexDirectors();
+
+
+    const initialDirectorCount =
+        directorsContainer.querySelectorAll(
+            '[data-director-card]'
+        ).length;
+
+
+    setDirectorsExpanded(
+        initialDirectorCount > 0
     );
 
 })();
@@ -4155,6 +3763,7 @@ require_once __DIR__ . '/../includes/header.php';
 |--------------------------------------------------------------------------
 */
 
-require_once __DIR__ . '/../includes/footer.php';
+require_once __DIR__ .
+    '/../includes/footer.php';
 
 ?>

@@ -225,22 +225,6 @@ foreach (
 
         </div>
 
-
-        <!-- ==================================================
-             SEARCH
-             ================================================== -->
-
-        <a
-            href="/pbo-portal/applications/search.php"
-            class="top-nav-link
-            <?= $activePage === 'search'
-                ? 'top-nav-active'
-                : '' ?>"
-        >
-            Search
-        </a>
-
-
         <!-- ==================================================
              RECORDS
              ================================================== -->
@@ -253,6 +237,20 @@ foreach (
                 : '' ?>"
         >
             Records
+        </a>
+
+                <!-- ==================================================
+             LIST OF PBOs
+             ================================================== -->
+
+        <a
+            href="/pbo-portal/applications/pbos.php"
+            class="top-nav-link
+            <?= $activePage === 'pbos'
+                ? 'top-nav-active'
+                : '' ?>"
+        >
+            List of PBOs
         </a>
 
 

@@ -21,7 +21,7 @@ $activePage = 'applications';
 
 /*
 |--------------------------------------------------------------------------
-| Database connection
+| Database
 |--------------------------------------------------------------------------
 */
 
@@ -46,10 +46,13 @@ if (!$connection instanceof PDO) {
 |--------------------------------------------------------------------------
 */
 
-$userId = (int) ($_SESSION['user_id'] ?? 0);
+$userId =
+    (int) ($_SESSION['user_id'] ?? 0);
 
 if ($userId <= 0) {
-    header('Location: /pbo-portal/login.php');
+    header(
+        'Location: /pbo-portal/login.php'
+    );
     exit;
 }
 
@@ -70,18 +73,18 @@ function e(?string $value): string
 }
 
 
-function displayValue(mixed $value): string
+function hasValue(mixed $value): bool
 {
-    $value = trim((string) $value);
-
-    return $value !== ''
-        ? e($value)
-        : '<span class="text-muted">Not provided</span>';
+    return trim(
+        (string) $value
+    ) !== '';
 }
 
 
-function organizationTypeLabel(string $type): string
-{
+function organizationTypeLabel(
+    string $type
+): string {
+
     return match ($type) {
 
         'national'
@@ -90,19 +93,25 @@ function organizationTypeLabel(string $type): string
         'international'
             => 'International',
 
-    
-
         default
             => ucfirst(
-                str_replace('_', ' ', $type)
+                str_replace(
+                    '_',
+                    ' ',
+                    $type
+                )
             ),
     };
 }
 
 
-function designationLabel(string $designation): string
-{
-    return match (strtoupper($designation)) {
+function designationLabel(
+    string $designation
+): string {
+
+    return match (
+        strtoupper($designation)
+    ) {
 
         'CHAIRPERSON'
             => 'Chairperson',
@@ -130,9 +139,33 @@ function designationLabel(string $designation): string
 }
 
 
+function formatRegistrationDate(
+    mixed $value
+): string {
+
+    $value =
+        trim((string) $value);
+
+    if ($value === '') {
+        return '';
+    }
+
+    try {
+
+        return (
+            new DateTimeImmutable($value)
+        )->format('d F Y');
+
+    } catch (Throwable $exception) {
+
+        return $value;
+    }
+}
+
+
 /*
 |--------------------------------------------------------------------------
-| Month names
+| Months
 |--------------------------------------------------------------------------
 */
 
@@ -313,7 +346,9 @@ $beneficiaryLabels = [
 if (empty($_SESSION['csrf_token'])) {
 
     $_SESSION['csrf_token'] =
-        bin2hex(random_bytes(32));
+        bin2hex(
+            random_bytes(32)
+        );
 }
 
 $csrfToken =
@@ -326,19 +361,21 @@ $csrfToken =
 |--------------------------------------------------------------------------
 */
 
-$applicationId = filter_input(
-    INPUT_GET,
-    'id',
-    FILTER_VALIDATE_INT
-);
+$applicationId =
+    filter_input(
+        INPUT_GET,
+        'id',
+        FILTER_VALIDATE_INT
+    );
 
 if (!$applicationId) {
 
-    $applicationId = filter_input(
-        INPUT_POST,
-        'application_id',
-        FILTER_VALIDATE_INT
-    );
+    $applicationId =
+        filter_input(
+            INPUT_POST,
+            'application_id',
+            FILTER_VALIDATE_INT
+        );
 }
 
 if (!$applicationId) {
@@ -350,60 +387,77 @@ if (!$applicationId) {
     exit;
 }
 
+$applicationId =
+    (int) $applicationId;
+
 
 /*
 |--------------------------------------------------------------------------
-| Load master application
+| Master application
 |--------------------------------------------------------------------------
 */
 
-$statement = $connection->prepare(
-    "
-    SELECT
-        id,
-        application_reference,
-        pbo_name,
-        pbo_registration_number,
-        registration_type,
-        status,
-        current_step,
-        financial_year_start_month,
-        financial_year_end_month,
-        created_by,
-        updated_by,
-        submitted_by,
-        created_at,
-        updated_at,
-        submitted_at
-    FROM pbo_applications
-    WHERE id = :application_id
-      AND created_by = :user_id
-    LIMIT 1
-    "
-);
+$statement =
+    $connection->prepare(
+        "
+        SELECT
+            id,
+            application_reference,
+            pbo_name,
+            pbo_registration_number,
+            registration_date,
+            registration_type,
+            status,
+            current_step,
+            financial_year_start_month,
+            financial_year_end_month,
+            created_by,
+            updated_by,
+            submitted_by,
+            created_at,
+            updated_at,
+            submitted_at
+        FROM pbo_applications
+        WHERE id = :application_id
+          AND created_by = :user_id
+        LIMIT 1
+        "
+    );
 
 $statement->execute([
-    ':application_id' => $applicationId,
-    ':user_id' => $userId,
+
+    ':application_id'
+        => $applicationId,
+
+    ':user_id'
+        => $userId,
 ]);
 
 $application =
-    $statement->fetch(PDO::FETCH_ASSOC);
+    $statement->fetch(
+        PDO::FETCH_ASSOC
+    );
 
 if (!$application) {
 
     http_response_code(404);
-    exit('Application not found.');
+
+    exit(
+        'Application not found.'
+    );
 }
 
 
 /*
 |--------------------------------------------------------------------------
-| If already submitted
+| Submitted application
 |--------------------------------------------------------------------------
 */
 
-if ($application['status'] === 'submitted') {
+if (
+    $application['status'] ===
+    'submitted'
+) {
 
     header(
         'Location: /pbo-portal/applications/records.php'
@@ -415,37 +469,43 @@ if ($application['status'] === 'submitted') {
 
 /*
 |--------------------------------------------------------------------------
-| Load organization address
+| Address
 |--------------------------------------------------------------------------
 */
 
-$statement = $connection->prepare(
-    "
-    SELECT
-        county,
-        sub_county,
-        physical_address,
-        postal_address,
-        postal_code,
-        phone_number,
-        alternative_phone_number,
-        email
-    FROM application_addresses
-    WHERE application_id = :application_id
-    LIMIT 1
-    "
-);
+$statement =
+    $connection->prepare(
+        "
+        SELECT
+            county,
+            sub_county,
+            physical_address,
+            postal_address,
+            postal_code,
+            phone_number,
+            alternative_phone_number,
+            email
+        FROM application_addresses
+        WHERE application_id =
+            :application_id
+        LIMIT 1
+        "
+    );
 
 $statement->execute([
-    ':application_id' => $applicationId,
+    ':application_id'
+        => $applicationId,
 ]);
 
 $address =
-    $statement->fetch(PDO::FETCH_ASSOC);
+    $statement->fetch(
+        PDO::FETCH_ASSOC
+    );
 
 if (!$address) {
 
     $address = [
+
         'county' => '',
         'sub_county' => '',
         'physical_address' => '',
@@ -460,47 +520,54 @@ if (!$address) {
 
 /*
 |--------------------------------------------------------------------------
-| Load International details
+| International details
 |--------------------------------------------------------------------------
 */
 
 $internationalDetails = null;
 
 if (
-    $application['registration_type'] ===
-    'international'
+    $application[
+        'registration_type'
+    ] === 'international'
 ) {
 
-    $statement = $connection->prepare(
-        "
-        SELECT
-            parent_organization_name,
-            country_of_origin,
-            registration_number,
-            parent_physical_address,
-            parent_postal_address,
-            parent_postal_code,
-            parent_phone_number,
-            parent_email,
-            contact_person_name,
-            contact_person_phone,
-            contact_person_email
-        FROM application_international_details
-        WHERE application_id = :application_id
-        LIMIT 1
-        "
-    );
+    $statement =
+        $connection->prepare(
+            "
+            SELECT
+                parent_organization_name,
+                country_of_origin,
+                registration_number,
+                parent_physical_address,
+                parent_postal_address,
+                parent_postal_code,
+                parent_phone_number,
+                parent_email,
+                contact_person_name,
+                contact_person_phone,
+                contact_person_email
+            FROM application_international_details
+            WHERE application_id =
+                :application_id
+            LIMIT 1
+            "
+        );
 
     $statement->execute([
-        ':application_id' => $applicationId,
+        ':application_id'
+            => $applicationId,
     ]);
 
     $internationalDetails =
-        $statement->fetch(PDO::FETCH_ASSOC);
+        $statement->fetch(
+            PDO::FETCH_ASSOC
+        );
 
     if (!$internationalDetails) {
 
         $internationalDetails = [
+
             'parent_organization_name' => '',
             'country_of_origin' => '',
             'registration_number' => '',
@@ -519,92 +586,169 @@ if (
 
 /*
 |--------------------------------------------------------------------------
-| Load objectives
+| Objectives
 |--------------------------------------------------------------------------
 */
 
-$statement = $connection->prepare(
-    "
-    SELECT
-        objective_code,
-        description
-    FROM application_objectives
-    WHERE application_id = :application_id
-    ORDER BY id ASC
-    "
-);
+$statement =
+    $connection->prepare(
+        "
+        SELECT
+            objective_code,
+            description
+        FROM application_objectives
+        WHERE application_id =
+            :application_id
+        ORDER BY id ASC
+        "
+    );
 
 $statement->execute([
-    ':application_id' => $applicationId,
+    ':application_id'
+        => $applicationId,
 ]);
 
 $objectives =
-    $statement->fetchAll(PDO::FETCH_ASSOC);
+    $statement->fetchAll(
+        PDO::FETCH_ASSOC
+    );
 
 
 /*
 |--------------------------------------------------------------------------
-| Load beneficiaries
+| Beneficiaries
 |--------------------------------------------------------------------------
 */
 
-$statement = $connection->prepare(
-    "
-    SELECT
-        beneficiary_code,
-        description
-    FROM application_beneficiaries
-    WHERE application_id = :application_id
-    ORDER BY id ASC
-    "
-);
+$statement =
+    $connection->prepare(
+        "
+        SELECT
+            beneficiary_code,
+            description
+        FROM application_beneficiaries
+        WHERE application_id =
+            :application_id
+        ORDER BY id ASC
+        "
+    );
 
 $statement->execute([
-    ':application_id' => $applicationId,
+    ':application_id'
+        => $applicationId,
 ]);
 
 $beneficiaries =
-    $statement->fetchAll(PDO::FETCH_ASSOC);
+    $statement->fetchAll(
+        PDO::FETCH_ASSOC
+    );
 
 
 /*
 |--------------------------------------------------------------------------
-| Load officials
+| Officials
 |--------------------------------------------------------------------------
 */
 
-$statement = $connection->prepare(
-    "
-    SELECT
-        id,
-        full_name,
-        designation,
-        nationality,
-        id_passport_number,
-        kra_pin,
-        phone_number,
-        email,
-        signature
-    FROM application_officials
-    WHERE application_id = :application_id
-    ORDER BY
-        CASE designation
-            WHEN 'CHAIRPERSON' THEN 1
-            WHEN 'TREASURER' THEN 2
-            WHEN 'SECRETARY' THEN 3
-            WHEN 'DIRECTOR' THEN 4
-            ELSE 5
-        END,
-        id ASC
-    "
-);
+$statement =
+    $connection->prepare(
+        "
+        SELECT
+            id,
+            full_name,
+            designation,
+            nationality,
+            id_passport_number,
+            kra_pin,
+            phone_number,
+            email,
+            signature
+        FROM application_officials
+        WHERE application_id =
+            :application_id
+        ORDER BY
+            CASE designation
+                WHEN 'CHAIRPERSON'
+                    THEN 1
+                WHEN 'TREASURER'
+                    THEN 2
+                WHEN 'SECRETARY'
+                    THEN 3
+                WHEN 'DIRECTOR'
+                    THEN 4
+                ELSE 5
+            END,
+            id ASC
+        "
+    );
 
 $statement->execute([
-    ':application_id' => $applicationId,
+    ':application_id'
+        => $applicationId,
 ]);
 
 $officials =
-    $statement->fetchAll(PDO::FETCH_ASSOC);
+    $statement->fetchAll(
+        PDO::FETCH_ASSOC
+    );
+
+
+/*
+|--------------------------------------------------------------------------
+| Separate principal officials and Directors
+|--------------------------------------------------------------------------
+*/
+
+$principalOfficials = [
+
+    'CHAIRPERSON' => null,
+
+    'TREASURER' => null,
+
+    'SECRETARY' => null,
+];
+
+$directors = [];
+
+
+foreach ($officials as $official) {
+
+    $designation =
+        strtoupper(
+            trim(
+                (string)
+                $official[
+                    'designation'
+                ]
+            )
+        );
+
+
+    if (
+        array_key_exists(
+            $designation,
+            $principalOfficials
+        )
+    ) {
+
+        $principalOfficials[
+            $designation
+        ] =
+            $official;
+
+        continue;
+    }
+
+
+    if (
+        $designation ===
+        'DIRECTOR'
+    ) {
+
+        $directors[] =
+            $official;
+    }
+}
 
 
 /*
@@ -622,19 +766,51 @@ $completionErrors = [];
 |--------------------------------------------------------------------------
 */
 
-if (trim((string) $application['pbo_name']) === '') {
+if (
+    !hasValue(
+        $application['pbo_name']
+    )
+) {
 
     $completionErrors[] =
         'Name of PBO is missing.';
 }
 
+
+if (
+    !hasValue(
+        $application[
+            'pbo_registration_number'
+        ]
+    )
+) {
+
+    $completionErrors[] =
+        'PBO Registration Number is missing.';
+}
+
+
+if (
+    !hasValue(
+        $application[
+            'registration_date'
+        ]
+    )
+) {
+
+    $completionErrors[] =
+        'Date of Registration is missing.';
+}
+
+
 if (
     !in_array(
-        $application['registration_type'],
+        $application[
+            'registration_type'
+        ],
         [
             'national',
             'international',
-        
         ],
         true
     )
@@ -647,8 +823,11 @@ if (
 
 /*
 |--------------------------------------------------------------------------
-| Address
+| Required address fields
 |--------------------------------------------------------------------------
+|
+| Sub-County, Postal Code and Alternative Phone are optional.
+|
 */
 
 $requiredAddressFields = [
@@ -656,17 +835,11 @@ $requiredAddressFields = [
     'county'
         => 'County',
 
-    'sub_county'
-        => 'Sub-County',
-
     'physical_address'
         => 'Physical Address',
 
     'postal_address'
         => 'Postal Address',
-
-    'postal_code'
-        => 'Postal Code',
 
     'phone_number'
         => 'Organization Phone Number',
@@ -682,14 +855,14 @@ foreach (
 ) {
 
     if (
-        trim(
-            (string)
-            ($address[$field] ?? '')
-        ) === ''
+        !hasValue(
+            $address[$field] ?? ''
+        )
     ) {
 
         $completionErrors[] =
-            $label . ' is missing.';
+            $label .
+            ' is missing.';
     }
 }
 
@@ -701,8 +874,9 @@ foreach (
 */
 
 if (
-    $application['registration_type'] ===
-    'international'
+    $application[
+        'registration_type'
+    ] === 'international'
 ) {
 
     $requiredInternationalFields = [
@@ -748,14 +922,16 @@ if (
     ) {
 
         if (
-            trim(
-                (string)
-                ($internationalDetails[$field] ?? '')
-            ) === ''
+            !hasValue(
+                $internationalDetails[
+                    $field
+                ] ?? ''
+            )
         ) {
 
             $completionErrors[] =
-                $label . ' is missing.';
+                $label .
+                ' is missing.';
         }
     }
 }
@@ -774,20 +950,20 @@ if ($objectives === []) {
 }
 
 
-/*
-|--------------------------------------------------------------------------
-| Validate Objective OTHER
-|--------------------------------------------------------------------------
-*/
-
-foreach ($objectives as $objective) {
+foreach (
+    $objectives
+    as $objective
+) {
 
     if (
-        $objective['objective_code'] === 'OTHER' &&
-        trim(
-            (string)
-            ($objective['description'] ?? '')
-        ) === ''
+        $objective[
+            'objective_code'
+        ] === 'OTHER' &&
+        !hasValue(
+            $objective[
+                'description'
+            ] ?? ''
+        )
     ) {
 
         $completionErrors[] =
@@ -811,87 +987,114 @@ if ($beneficiaries === []) {
 
 /*
 |--------------------------------------------------------------------------
-| Financial year
+| Financial Year
 |--------------------------------------------------------------------------
+|
+| Valid period:
+|
+| January -> December
+| February -> January
+| March -> February
+| ...
+| December -> November
+|
 */
 
 $startMonth =
     (int)
-    ($application['financial_year_start_month'] ?? 0);
+    (
+        $application[
+            'financial_year_start_month'
+        ] ?? 0
+    );
 
 $endMonth =
     (int)
-    ($application['financial_year_end_month'] ?? 0);
+    (
+        $application[
+            'financial_year_end_month'
+        ] ?? 0
+    );
 
 
-if (!isset($months[$startMonth])) {
+if (
+    !isset($months[$startMonth]) ||
+    !isset($months[$endMonth])
+) {
 
     $completionErrors[] =
-        'Financial year start month is missing.';
-}
+        'Financial Year has not been selected.';
 
-if (!isset($months[$endMonth])) {
+} else {
 
-    $completionErrors[] =
-        'Financial year end month is missing.';
+    $expectedEndMonth =
+        $startMonth === 1
+            ? 12
+            : $startMonth - 1;
+
+
+    if (
+        $endMonth !==
+        $expectedEndMonth
+    ) {
+
+        $completionErrors[] =
+            'The selected Financial Year is not a valid twelve-month period.';
+    }
 }
 
 
 /*
 |--------------------------------------------------------------------------
-| Officials
+| Principal Officials
 |--------------------------------------------------------------------------
+|
+| Only Chairperson, Treasurer and Secretary are required.
+| Signatures are NOT required.
+|
 */
 
-$requiredRoles = [
-    'CHAIRPERSON',
-    'TREASURER',
-    'SECRETARY',
+$requiredOfficialFields = [
+
+    'full_name'
+        => 'Name',
+
+    'nationality'
+        => 'Nationality',
+
+    'id_passport_number'
+        => 'ID / Passport Number',
+
+    'kra_pin'
+        => 'KRA PIN',
+
+    'phone_number'
+        => 'Phone Number',
+
+    'email'
+        => 'Email',
 ];
 
-$foundRoles = [];
 
-foreach ($officials as $official) {
+foreach (
+    $principalOfficials
+    as $designation => $official
+) {
 
-    $designation =
-        strtoupper(
-            trim(
-                (string)
-                $official['designation']
-            )
+    $roleLabel =
+        designationLabel(
+            $designation
         );
 
-    $foundRoles[] =
-        $designation;
 
+    if ($official === null) {
 
-    /*
-    | Validate seven particulars.
-    */
+        $completionErrors[] =
+            $roleLabel .
+            ' has not been entered.';
 
-    $requiredOfficialFields = [
-
-        'full_name'
-            => 'Name',
-
-        'nationality'
-            => 'Nationality',
-
-        'id_passport_number'
-            => 'ID / Passport Number',
-
-        'kra_pin'
-            => 'KRA PIN',
-
-        'phone_number'
-            => 'Phone Number',
-
-        'email'
-            => 'Email',
-
-        'signature'
-            => 'Signature',
-    ];
+        continue;
+    }
 
 
     foreach (
@@ -900,64 +1103,119 @@ foreach ($officials as $official) {
     ) {
 
         if (
-            trim(
-                (string)
-                ($official[$field] ?? '')
-            ) === ''
+            !hasValue(
+                $official[
+                    $field
+                ] ?? ''
+            )
         ) {
 
             $completionErrors[] =
-                designationLabel(
-                    $designation
-                ) .
+                $roleLabel .
+                ' — ' .
+                $label .
+                ' is missing.';        }
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Validate email where present
+    |--------------------------------------------------------------------------
+    */
+
+    if (
+        hasValue(
+            $official['email'] ?? ''
+        ) &&
+        !filter_var(
+            $official['email'],
+            FILTER_VALIDATE_EMAIL
+        )
+    ) {
+
+        $completionErrors[] =
+            $roleLabel .
+            ' — Email is invalid.';
+    }
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Directors
+|--------------------------------------------------------------------------
+|
+| Directors are OPTIONAL.
+|
+| No minimum Director count is enforced here.
+| Signatures are also optional.
+|
+| If a Director exists in the database, validate the six textual particulars
+| so an incomplete Director record is not submitted.
+|
+*/
+
+foreach (
+    $directors
+    as $index => $director
+) {
+
+    $directorLabel =
+        'Director ' .
+        ($index + 1);
+
+
+    foreach (
+        $requiredOfficialFields
+        as $field => $label
+    ) {
+
+        if (
+            !hasValue(
+                $director[$field] ?? ''
+            )
+        ) {
+
+            $completionErrors[] =
+                $directorLabel .
                 ' — ' .
                 $label .
                 ' is missing.';
         }
     }
-}
 
-
-foreach ($requiredRoles as $role) {
 
     if (
-        !in_array(
-            $role,
-            $foundRoles,
-            true
+        hasValue(
+            $director['email'] ?? ''
+        ) &&
+        !filter_var(
+            $director['email'],
+            FILTER_VALIDATE_EMAIL
         )
     ) {
 
         $completionErrors[] =
-            designationLabel($role) .
-            ' has not been entered.';
+            $directorLabel .
+            ' — Email is invalid.';
     }
 }
 
 
 /*
 |--------------------------------------------------------------------------
-| Minimum five persons
-|--------------------------------------------------------------------------
-*/
-
-if (count($officials) < 5) {
-
-    $completionErrors[] =
-        'At least five officials/directors must be captured.';
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| POST — Submit Application
+| POST — Final submission
 |--------------------------------------------------------------------------
 */
 
 $submitErrors = [];
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
+if (
+    $_SERVER['REQUEST_METHOD'] ===
+    'POST'
+) {
 
     /*
     |--------------------------------------------------------------------------
@@ -1003,8 +1261,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     */
 
     $confirmed =
-        isset($_POST['confirm_information']) &&
-        $_POST['confirm_information'] === '1';
+        isset(
+            $_POST[
+                'confirm_information'
+            ]
+        ) &&
+        $_POST[
+            'confirm_information'
+        ] === '1';
 
 
     if (!$confirmed) {
@@ -1029,12 +1293,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             /*
             |--------------------------------------------------------------------------
-            | Lock application
+            | Lock draft
             |--------------------------------------------------------------------------
-            |
-            | Prevents two browser tabs from submitting the same draft
-            | simultaneously.
-            |
             */
 
             $statement =
@@ -1043,14 +1303,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     SELECT
                         status
                     FROM pbo_applications
-                    WHERE id = :application_id
-                      AND created_by = :user_id
+                    WHERE id =
+                        :application_id
+                      AND created_by =
+                        :user_id
                     FOR UPDATE
                     "
                 );
 
 
             $statement->execute([
+
                 ':application_id'
                     => $applicationId,
 
@@ -1073,8 +1336,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
 
-            if (                $lockedApplication['status'] !==
-                'draft'
+            if (
+                $lockedApplication[
+                    'status'
+                ] !== 'draft'
             ) {
 
                 throw new RuntimeException(
@@ -1085,7 +1350,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             /*
             |--------------------------------------------------------------------------
-            | Mark application as submitted
+            | Submit application
             |--------------------------------------------------------------------------
             */
 
@@ -1094,13 +1359,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     "
                     UPDATE pbo_applications
                     SET
-                        status = 'submitted',
-                        current_step = 6,
-                        updated_by = :updated_by,
-                        submitted_by = :submitted_by,
-                        submitted_at = CURRENT_TIMESTAMP
-                    WHERE id = :application_id
-                      AND status = 'draft'
+                        status =
+                            'submitted',
+
+                        current_step =
+                            6,
+
+                        updated_by =
+                            :updated_by,
+
+                        submitted_by =
+                            :submitted_by,
+
+                        submitted_at =
+                            CURRENT_TIMESTAMP
+
+                    WHERE id =
+                        :application_id
+
+                      AND status =
+                            'draft'
                     "
                 );
 
@@ -1120,7 +1398,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             /*
             |--------------------------------------------------------------------------
-            | Audit log
+            | Ensure one row was actually submitted
+            |--------------------------------------------------------------------------
+            */
+
+            if (
+                $statement->rowCount() !== 1
+            ) {
+
+                throw new RuntimeException(
+                    'The application could not be marked as submitted.'
+                );
+            }
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Audit
             |--------------------------------------------------------------------------
             */
 
@@ -1158,75 +1452,77 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ]);
 
 
+            $connection->commit();
+
+
             /*
             |--------------------------------------------------------------------------
-            | Commit
+            | Success message
             |--------------------------------------------------------------------------
             */
 
-           /*
-|--------------------------------------------------------------------------
-| Commit
-|--------------------------------------------------------------------------
-*/
-
-$connection->commit();
-
-
-/*
-|--------------------------------------------------------------------------
-| Success flash message
-|--------------------------------------------------------------------------
-*/
-
-$applicationReference =
-    trim(
-        (string)
-        ($application['application_reference'] ?? '')
-    );
+            $applicationReference =
+                trim(
+                    (string)
+                    (
+                        $application[
+                            'application_reference'
+                        ] ?? ''
+                    )
+                );
 
 
-if ($applicationReference !== '') {
+            if (
+                $applicationReference !== ''
+            ) {
 
-    $_SESSION['flash_success'] =
-        'PBO application ' .
-        $applicationReference .
-        ' was submitted successfully.';
+                $_SESSION[
+                    'flash_success'
+                ] =
+                    'PBO application ' .
+                    $applicationReference .
+                    ' was submitted successfully.';
 
-} else {
+            } else {
 
-    $_SESSION['flash_success'] =
-        'PBO application was submitted successfully.';
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Rotate CSRF token
-|--------------------------------------------------------------------------
-*/
-
-$_SESSION['csrf_token'] =
-    bin2hex(
-        random_bytes(32)
-    );
+                $_SESSION[
+                    'flash_success'
+                ] =
+                    'PBO application was submitted successfully.';
+            }
 
 
-/*
-|--------------------------------------------------------------------------
-| Redirect to Home
-|--------------------------------------------------------------------------
-*/
+            /*
+            |--------------------------------------------------------------------------
+            | Rotate CSRF token
+            |--------------------------------------------------------------------------
+            */
 
-header(
-    'Location: /pbo-portal/'
-);
+            $_SESSION['csrf_token'] =
+                bin2hex(
+                    random_bytes(32)
+                );
 
-exit;
+
+            /*
+            |--------------------------------------------------------------------------
+            | Home
+            |--------------------------------------------------------------------------
+            */
+
+            header(
+                'Location: /pbo-portal/'
+            );
+
+            exit;
+
 
         } catch (Throwable $exception) {
 
-            if ($connection->inTransaction()) {
+            if (
+                $connection->inTransaction()
+            ) {
+
                 $connection->rollBack();
             }
 
@@ -1250,9 +1546,268 @@ exit;
 |--------------------------------------------------------------------------
 */
 
-require_once __DIR__ . '/../includes/header.php';
+require_once __DIR__ .
+    '/../includes/header.php';
 
 ?>
+
+
+<style>
+
+.review-shell {
+    display: grid;
+    gap: 20px;
+}
+
+
+.review-section {
+    overflow: hidden;
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+}
+
+
+.review-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 18px 22px;
+    background:
+        linear-gradient(
+            100deg,
+            var(--blue-light),
+            #ffffff
+        );
+    border-bottom: 1px solid var(--border);
+}
+
+
+.review-section-heading {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+}
+
+
+.review-number {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 34px;
+    width: 34px;
+    height: 34px;
+    border: 1px solid #c8dced;
+    border-radius: 50%;
+    background: #eef6fc;
+    color: var(--blue-dark);
+    font-size: 12px;
+    font-weight: 800;
+}
+
+
+.review-section-header h2 {
+    margin: 0 0 3px;
+    color: var(--blue-dark);
+    font-size: 17px;
+}
+
+
+.review-section-header p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+
+.review-section-body {
+    padding: 21px 24px;
+}
+
+
+.review-grid {
+    display: grid;
+    grid-template-columns:
+        repeat(
+            auto-fit,
+            minmax(210px, 1fr)
+        );
+    gap: 18px 24px;
+}
+
+
+.review-field {
+    min-width: 0;
+}
+
+
+.review-field-label {
+    display: block;
+    margin-bottom: 5px;
+    color: var(--text-muted);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: .55px;
+    text-transform: uppercase;
+}
+
+
+.review-field-value {
+    display: block;
+    overflow-wrap: anywhere;
+    color: var(--heading);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+
+.review-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+
+.review-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    background: var(--soft-bg);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    color: var(--heading);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+
+.review-tag-check {
+    color: var(--green);
+    font-weight: 900;
+}
+
+
+.official-grid {
+    display: grid;
+    grid-template-columns:
+        repeat(
+            auto-fit,
+            minmax(290px, 1fr)
+        );
+    gap: 16px;
+}
+
+
+.official-card {
+    overflow: hidden;
+    background: #ffffff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+
+.official-card-header {
+    padding: 13px 16px;
+    background: var(--soft-bg);
+    border-bottom: 1px solid var(--border);
+}
+
+
+.official-card-header span {
+    display: block;
+    margin-bottom: 2px;
+    color: var(--text-muted);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: .5px;
+    text-transform: uppercase;
+}
+
+
+.official-card-header h3 {
+    margin: 0;
+    color: var(--blue-dark);
+    font-size: 15px;
+}
+
+
+.official-card-body {
+    padding: 16px;
+}
+
+
+.official-card .review-grid {
+    grid-template-columns:
+        repeat(
+            2,
+            minmax(0, 1fr)
+        );
+    gap: 13px 16px;
+}
+
+
+.signature-on-file {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 15px;
+    padding: 7px 10px;
+    background: var(--green-light);
+    border: 1px solid #c3dfce;
+    border-radius: 6px;
+    color: var(--green-dark);
+    font-size: 10px;
+    font-weight: 800;
+}
+
+
+.optional-block {
+    margin-top: 19px;
+    padding-top: 19px;
+    border-top: 1px solid var(--border);
+}
+
+
+.optional-block-title {
+    margin: 0 0 13px;
+    color: var(--blue-dark);
+    font-size: 14px;
+}
+
+
+.review-complete {
+    padding: 16px 18px;
+    background: var(--green-light);
+    border: 1px solid #c3dfce;
+    border-left: 4px solid var(--green);
+    border-radius: var(--radius);
+}
+
+
+.review-complete strong {
+    display: block;
+    margin-bottom: 3px;
+    color: var(--green-dark);
+}
+
+
+@media (max-width: 650px) {
+
+    .review-section-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+
+    .official-card .review-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+</style>
 
 
 <div class="applications-page">
@@ -1275,8 +1830,7 @@ require_once __DIR__ . '/../includes/header.php';
             </h1>
 
             <p class="subtitle">
-                Step 6 of 6 — Review all application information
-                before final submission.
+                Step 6 of 6 — Verify the application before final submission.
             </p>
 
         </div>
@@ -1284,22 +1838,25 @@ require_once __DIR__ . '/../includes/header.php';
     </section>
 
 
-    <!-- ==========================================================
-         APPLICATION SUMMARY
-         ========================================================== -->
+    <!-- Application identity -->
 
     <div class="admin-info">
 
         <strong>
             <?= e(
                 (string)
-                $application['pbo_name']
+                $application[
+                    'pbo_name'
+                ]
             ) ?>
         </strong>
 
+
         <?php if (
-            !empty(
-                $application['application_reference']
+            hasValue(
+                $application[
+                    'application_reference'
+                ] ?? ''
             )
         ): ?>
 
@@ -1310,7 +1867,9 @@ require_once __DIR__ . '/../includes/header.php';
             <strong>
                 <?= e(
                     (string)
-                    $application['application_reference']
+                    $application[
+                        'application_reference'
+                    ]
                 ) ?>
             </strong>
 
@@ -1319,89 +1878,31 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
 
 
-    <!-- ==========================================================
-         PROGRESS
-         ========================================================== -->
+    <?php
 
-    <div
-        style="
-            margin-bottom: 22px;
-            padding: 16px 18px;
-            background: #ffffff;
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            box-shadow: var(--shadow-sm);
-        "
-    >
+    $wizardCurrentStep = 6;
 
-        <div
-            style="
-                display: flex;
-                justify-content: space-between;
-                gap: 10px;
-                margin-bottom: 10px;
-                color: var(--text-secondary);
-                font-size: 11px;
-                font-weight: 700;
-            "
-        >
+    require __DIR__ .
+        '/../includes/application-wizard.php';
 
-            <span>1. Organization</span>
-            <span>2. Objectives</span>
-            <span>3. Beneficiaries</span>
-            <span>4. Financial Year</span>
-            <span>5. Officials</span>
-
-            <span style="color: var(--blue);">
-                6. Review
-            </span>
-
-        </div>
-
-
-        <div
-            style="
-                width: 100%;
-                height: 7px;
-                overflow: hidden;
-                background: #e9edf1;
-                border-radius: 20px;
-            "
-        >
-
-            <div
-                style="
-                    width: 100%;
-                    height: 100%;
-                    background:
-                        linear-gradient(
-                            90deg,
-                            var(--blue),
-                            var(--blue-medium)
-                        );
-                "
-            ></div>
-
-        </div>
-
-    </div>
+    ?>
 
 
     <!-- ==========================================================
-         COMPLETENESS STATUS
+         COMPLETENESS
          ========================================================== -->
 
-    <?php if ($completionErrors === []): ?>
+    <?php if (
+        $completionErrors === []
+    ): ?>
 
-        <div class="alert alert-success">
+        <div class="review-complete">
 
             <strong>
-                Application complete.
+                Application complete
             </strong>
 
-            All required application sections contain the information
-            needed for submission.
-
+            All required information is present.
         </div>
 
     <?php else: ?>
@@ -1412,11 +1913,20 @@ require_once __DIR__ . '/../includes/header.php';
                 This application is not yet complete.
             </strong>
 
-            <p style="margin: 6px 0 8px;">
+            <p
+                style="
+                    margin: 6px 0 8px;
+                "
+            >
                 Correct the following items before submitting:
             </p>
 
-            <ul style="margin: 0; padding-left: 20px;">
+            <ul
+                style="
+                    margin: 0;
+                    padding-left: 20px;
+                "
+            >
 
                 <?php foreach (
                     $completionErrors
@@ -1436,7 +1946,9 @@ require_once __DIR__ . '/../includes/header.php';
     <?php endif; ?>
 
 
-    <?php if ($submitErrors !== []): ?>
+    <?php if (
+        $submitErrors !== []
+    ): ?>
 
         <div class="alert alert-error">
 
@@ -1444,7 +1956,12 @@ require_once __DIR__ . '/../includes/header.php';
                 Application not submitted.
             </strong>
 
-            <ul style="margin: 8px 0 0; padding-left: 20px;">
+            <ul
+                style="
+                    margin: 8px 0 0;
+                    padding-left: 20px;
+                "
+            >
 
                 <?php foreach (
                     $submitErrors
@@ -1464,42 +1981,42 @@ require_once __DIR__ . '/../includes/header.php';
     <?php endif; ?>
 
 
-    <!-- ==========================================================
-         REVIEW CONTENT
-         ========================================================== -->
-
-    <div class="application-form">
+    <div class="review-shell">
 
 
         <!-- ======================================================
-             1. ORGANIZATION DETAILS
+             1. ORGANIZATION
              ====================================================== -->
 
-        <section class="application-section">
+        <section class="review-section">
 
-            <div class="application-section-heading">
+            <div class="review-section-header">
 
-                <div class="application-section-number">
-                    1
-                </div>
+                <div class="review-section-heading">
 
-                <div style="flex: 1;">
+                    <div class="review-number">
+                        1
+                    </div>
 
-                    <h2>
-                        Organization Details
-                    </h2>
+                    <div>
 
-                    <p>
-                        Particulars and address of the proposed
-                        Public Benefit Organization.
-                    </p>
+                        <h2>
+                            Organization Details
+                        </h2>
+
+                        <p>
+                            Registration and contact particulars.
+                        </p>
+
+                    </div>
 
                 </div>
 
 
                 <a
                     href="/pbo-portal/applications/create.php?id=<?= urlencode(
-                        (string) $applicationId
+                        (string)
+                        $applicationId
                     ) ?>"
                     class="btn btn-secondary btn-sm"
                 >
@@ -1509,172 +2026,254 @@ require_once __DIR__ . '/../includes/header.php';
             </div>
 
 
-            <div class="record-grid">
+            <div class="review-section-body">
 
-                <div class="record-field">
-
-                    <span>
-                        Name of PBO
-                    </span>
-
-                    <strong>
-                        <?= displayValue(
-                            $application['pbo_name']
-                        ) ?>
-                    </strong>
-
-                </div>
+                <div class="review-grid">
 
 
-                <div class="record-field">
+                    <div class="review-field">
 
-                    <span>
-                        PBO Registration Number
-                    </span>
+                        <span class="review-field-label">
+                            Name of PBO
+                        </span>
 
-                    <strong>
-                        <?= displayValue(
-                            $application['pbo_registration_number']
-                        ) ?>
-                    </strong>
-
-                </div>
-
-
-                <div class="record-field">
-
-                    <span>
-                        Type of Organization
-                    </span>
-
-                    <strong>
-                        <?= e(
-                            organizationTypeLabel(
+                        <span class="review-field-value">
+                            <?= e(
                                 (string)
-                                $application['registration_type']
-                            )
-                        ) ?>
-                    </strong>
+                                $application[
+                                    'pbo_name'
+                                ]
+                            ) ?>
+                        </span>
 
-                </div>
-
-
-                <div class="record-field">
-
-                    <span>
-                        County
-                    </span>
-
-                    <strong>
-                        <?= displayValue(
-                            $address['county']
-                        ) ?>
-                    </strong>
-
-                </div>
+                    </div>
 
 
-                <div class="record-field">
+                    <div class="review-field">
 
-                    <span>
-                        Sub-County
-                    </span>
+                        <span class="review-field-label">
+                            PBO Registration Number
+                        </span>
 
-                    <strong>
-                        <?= displayValue(
-                            $address['sub_county']
-                        ) ?>
-                    </strong>
+                        <span class="review-field-value">
+                            <?= e(
+                                (string)
+                                $application[
+                                    'pbo_registration_number'
+                                ]
+                            ) ?>
+                        </span>
 
-                </div>
-
-
-                <div class="record-field">
-
-                    <span>
-                        Physical Address
-                    </span>
-
-                    <strong>
-                        <?= displayValue(
-                            $address['physical_address']
-                        ) ?>
-                    </strong>
-
-                </div>
+                    </div>
 
 
-                <div class="record-field">
+                    <div class="review-field">
 
-                    <span>
-                        Postal Address
-                    </span>
+                        <span class="review-field-label">
+                            Date of Registration
+                        </span>
 
-                    <strong>
-                        <?= displayValue(
-                            $address['postal_address']
-                        ) ?>
-                    </strong>
+                        <span class="review-field-value">
+                            <?= e(
+                                formatRegistrationDate(
+                                    $application[
+                                        'registration_date'
+                                    ]
+                                )
+                            ) ?>
+                        </span>
 
-                </div>
-
-
-                <div class="record-field">
-
-                    <span>
-                        Postal Code
-                    </span>
-
-                    <strong>
-                        <?= displayValue(
-                            $address['postal_code']
-                        ) ?>
-                    </strong>
-
-                </div>
+                    </div>
 
 
-                <div class="record-field">
+                    <div class="review-field">
 
-                    <span>
-                        Phone Number
-                    </span>
+                        <span class="review-field-label">
+                            Type of Organization
+                        </span>
 
-                    <strong>
-                        <?= displayValue(
-                            $address['phone_number']
-                        ) ?>
-                    </strong>
+                        <span class="review-field-value">
+                            <?= e(
+                                organizationTypeLabel(
+                                    (string)
+                                    $application[
+                                        'registration_type'
+                                    ]
+                                )
+                            ) ?>
+                        </span>
 
-                </div>
-
-
-                <div class="record-field">
-
-                    <span>
-                        Alternative Phone Number
-                    </span>
-
-                    <strong>
-                        <?= displayValue(
-                            $address['alternative_phone_number']
-                        ) ?>
-                    </strong>
-
-                </div>
+                    </div>
 
 
-                <div class="record-field">
+                    <div class="review-field">
 
-                    <span>
-                        Email
-                    </span>
+                        <span class="review-field-label">
+                            County
+                        </span>
 
-                    <strong>
-                        <?= displayValue(
-                            $address['email']
-                        ) ?>
-                    </strong>
+                        <span class="review-field-value">
+                            <?= e(
+                                (string)
+                                $address['county']
+                            ) ?>
+                        </span>
+
+                    </div>
+
+
+                    <?php if (
+                        hasValue(
+                            $address[
+                                'sub_county'
+                            ] ?? ''
+                        )
+                    ): ?>
+
+                        <div class="review-field">
+
+                            <span class="review-field-label">
+                                Sub-County
+                            </span>
+
+                            <span class="review-field-value">
+                                <?= e(
+                                    (string)
+                                    $address[
+                                        'sub_county'
+                                    ]
+                                ) ?>
+                            </span>
+
+                        </div>
+
+                    <?php endif; ?>
+
+
+                    <div class="review-field">
+
+                        <span class="review-field-label">
+                            Physical Address
+                        </span>
+
+                        <span class="review-field-value">
+                            <?= e(
+                                (string)
+                                $address[
+                                    'physical_address'
+                                ]
+                            ) ?>
+                        </span>
+
+                    </div>
+
+
+                    <div class="review-field">
+
+                        <span class="review-field-label">
+                            Postal Address
+                        </span>
+
+                        <span class="review-field-value">
+                            <?= e(
+                                (string)
+                                $address[
+                                    'postal_address'
+                                ]
+                            ) ?>
+                        </span>
+
+                    </div>
+
+
+                    <?php if (
+                        hasValue(
+                            $address[
+                                'postal_code'
+                            ] ?? ''
+                        )
+                    ): ?>
+
+                        <div class="review-field">
+
+                            <span class="review-field-label">
+                                Postal Code
+                            </span>
+
+                            <span class="review-field-value">
+                                <?= e(
+                                    (string)
+                                    $address[
+                                        'postal_code'
+                                    ]
+                                ) ?>
+                            </span>
+
+                        </div>
+
+                    <?php endif; ?>
+
+
+                    <div class="review-field">
+
+                        <span class="review-field-label">
+                            Phone Number
+                        </span>
+
+                        <                        <span class="review-field-value">
+                            <?= e(
+                                (string)
+                                $address[
+                                    'phone_number'
+                                ]
+                            ) ?>
+                        </span>
+
+                    </div>
+
+
+                    <?php if (
+                        hasValue(
+                            $address[
+                                'alternative_phone_number'
+                            ] ?? ''
+                        )
+                    ): ?>
+
+                        <div class="review-field">
+
+                            <span class="review-field-label">
+                                Alternative Phone Number
+                            </span>
+
+                            <span class="review-field-value">
+                                <?= e(
+                                    (string)
+                                    $address[
+                                        'alternative_phone_number'
+                                    ]
+                                ) ?>
+                            </span>
+
+                        </div>
+
+                    <?php endif; ?>
+
+
+                    <div class="review-field">
+
+                        <span class="review-field-label">
+                            Email
+                        </span>
+
+                        <span class="review-field-value">
+                            <?= e(
+                                (string)
+                                $address['email']
+                            ) ?>
+                        </span>
+
+                    </div>
 
                 </div>
 
@@ -1684,39 +2283,44 @@ require_once __DIR__ . '/../includes/header.php';
 
 
         <!-- ======================================================
-             INTERNATIONAL DETAILS
+             1A. INTERNATIONAL DETAILS
              ====================================================== -->
 
         <?php if (
-            $application['registration_type'] ===
-            'international'
+            $application[
+                'registration_type'
+            ] === 'international'
         ): ?>
 
-            <section class="application-section">
+            <section class="review-section">
 
-                <div class="application-section-heading">
+                <div class="review-section-header">
 
-                    <div class="application-section-number">
-                        1A
-                    </div>
+                    <div class="review-section-heading">
 
-                    <div style="flex: 1;">
+                        <div class="review-number">
+                            1A
+                        </div>
 
-                        <h2>
-                            Registration Status
-                        </h2>
+                        <div>
 
-                        <p>
-                            Parent organization and contact-person
-                            particulars.
-                        </p>
+                            <h2>
+                                International Registration Status
+                            </h2>
+
+                            <p>
+                                Parent organization and contact-person particulars.
+                            </p>
+
+                        </div>
 
                     </div>
 
 
                     <a
                         href="/pbo-portal/applications/create.php?id=<?= urlencode(
-                            (string) $applicationId
+                            (string)
+                            $applicationId
                         ) ?>"
                         class="btn btn-secondary btn-sm"
                     >
@@ -1726,192 +2330,76 @@ require_once __DIR__ . '/../includes/header.php';
                 </div>
 
 
-                <div class="record-grid">
+                <div class="review-section-body">
+
+                    <div class="review-grid">
+
+                        <?php
+
+                        $internationalReviewFields = [
+
+                            'parent_organization_name'
+                                => 'Parent Organization',
+
+                            'country_of_origin'
+                                => 'Country of Registration',
+
+                            'registration_number'
+                                => 'PBO / Charity Registration Number',
+
+                            'parent_physical_address'
+                                => 'Physical Address',
+
+                            'parent_postal_address'
+                                => 'Postal Address',
+
+                            'parent_postal_code'
+                                => 'Postal Code',
+
+                            'parent_phone_number'
+                                => 'Parent Organization Phone',
+
+                            'parent_email'
+                                => 'Parent Organization Email',
+
+                            'contact_person_name'
+                                => 'Contact Person',
+
+                            'contact_person_phone'
+                                => 'Contact Person Phone',
+
+                            'contact_person_email'
+                                => 'Contact Person Email',
+                        ];
+
+                        ?>
 
 
-                    <div class="record-field">
+                        <?php foreach (
+                            $internationalReviewFields
+                            as $field => $label
+                        ): ?>
 
-                        <span>
-                            Parent Organization
-                        </span>
+                            <div class="review-field">
 
-                        <strong>
-                            <?= displayValue(
-                                $internationalDetails[
-                                    'parent_organization_name'
-                                ]
-                            ) ?>
-                        </strong>
+                                <span class="review-field-label">
+                                    <?= e($label) ?>
+                                </span>
 
-                    </div>
+                                <span class="review-field-value">
+                                    <?= e(
+                                        (string)
+                                        (
+                                            $internationalDetails[
+                                                $field
+                                            ] ?? ''
+                                        )
+                                    ) ?>
+                                </span>
 
+                            </div>
 
-                    <div class="record-field">
-
-                        <span>
-                            Country of Registration
-                        </span>
-
-                        <strong>
-                            <?= displayValue(
-                                $internationalDetails[
-                                    'country_of_origin'
-                                ]
-                            ) ?>
-                        </strong>
-
-                    </div>
-
-
-                    <div class="record-field">
-
-                        <span>
-                            PBO / Charity Registration Number
-                        </span>
-
-                        <strong>
-                            <?= displayValue(
-                                $internationalDetails[
-                                    'registration_number'
-                                ]
-                            ) ?>
-                        </strong>
-
-                    </div>
-
-
-                    <div class="record-field">
-
-                        <span>
-                            Physical Address
-                        </span>
-
-                        <strong>
-                            <?= displayValue(
-                                $internationalDetails[
-                                    'parent_physical_address'
-                                ]
-                            ) ?>
-                        </strong>
-
-                    </div>
-
-
-                    <div class="record-field">
-
-                        <span>
-                            Postal Address
-                        </span>
-
-                        <strong>
-                            <?= displayValue(
-                                $internationalDetails[
-                                    'parent_postal_address'
-                                ]
-                            ) ?>
-                        </strong>
-
-                    </div>
-
-
-                    <div class="record-field">
-
-                        <span>
-                            Postal Code
-                        </span>
-
-                        <strong>
-                            <?= displayValue(
-                                $internationalDetails[
-                                    'parent_postal_code'
-                                ]
-                            ) ?>
-                        </strong>
-
-                    </div>
-
-
-                    <div class="record-field">
-
-                        <span>
-                            Parent Organization Phone
-                        </span>
-
-                        <strong>
-                            <?= displayValue(
-                                $internationalDetails[
-                                    'parent_phone_number'
-                                ]
-                            ) ?>
-                        </strong>
-
-                    </div>
-
-
-                    <div class="record-field">
-
-                        <span>
-                            Parent Organization Email
-                        </span>
-
-                        <strong>
-                            <?= displayValue(
-                                $internationalDetails[
-                                    'parent_email'
-                                ]
-                            ) ?>
-                        </strong>
-
-                    </div>
-
-
-                    <div class="record-field">
-
-                        <span>
-                            Contact Person
-                        </span>
-
-                        <strong>
-                            <?= displayValue(
-                                $internationalDetails[
-                                    'contact_person_name'
-                                ]
-                            ) ?>
-                        </strong>
-
-                    </div>
-
-
-                    <div class="record-field">
-
-                        <span>
-                            Contact Person Phone
-                        </span>
-
-                        <strong>
-                            <?= displayValue(
-                                $internationalDetails[
-                                    'contact_person_phone'
-                                ]
-                            ) ?>
-                        </strong>
-
-                    </div>
-
-
-                    <div class="record-field">
-
-                        <span>
-                            Contact Person Email
-                        </span>
-
-                        <strong>
-                            <?= displayValue(
-                                $internationalDetails[
-                                    'contact_person_email'
-                                ]
-                            ) ?>
-                        </strong>
+                        <?php endforeach; ?>
 
                     </div>
 
@@ -1926,31 +2414,35 @@ require_once __DIR__ . '/../includes/header.php';
              2. OBJECTIVES
              ====================================================== -->
 
-        <section class="application-section">
+        <section class="review-section">
 
-            <div class="application-section-heading">
+            <div class="review-section-header">
 
-                <div class="application-section-number">
-                    2
-                </div>
+                <div class="review-section-heading">
 
-                <div style="flex: 1;">
+                    <div class="review-number">
+                        2
+                    </div>
 
-                    <h2>
-                        Public Benefit Purposes
-                    </h2>
+                    <div>
 
-                    <p>
-                        Selected activities relating to the
-                        organization's public benefit purposes.
-                    </p>
+                        <h2>
+                            Public Benefit Purposes
+                        </h2>
+
+                        <p>
+                            Selected public benefit purposes of the organization.
+                        </p>
+
+                    </div>
 
                 </div>
 
 
                 <a
                     href="/pbo-portal/applications/objectives.php?id=<?= urlencode(
-                        (string) $applicationId
+                        (string)
+                        $applicationId
                     ) ?>"
                     class="btn btn-secondary btn-sm"
                 >
@@ -1960,132 +2452,123 @@ require_once __DIR__ . '/../includes/header.php';
             </div>
 
 
-            <?php if ($objectives !== []): ?>
+            <div class="review-section-body">
 
-                <div
-                    class="checkbox-group"
-                    style="
-                        display: grid;
-                        grid-template-columns:
-                            repeat(
-                                auto-fit,
-                                minmax(250px, 1fr)
-                            );
-                        gap: 10px;
-                    "
-                >
+                <?php if (
+                    $objectives !== []
+                ): ?>
+
+                    <div class="review-tags">
+
+                        <?php foreach (
+                            $objectives
+                            as $objective
+                        ): ?>
+
+                            <?php
+
+                            $objectiveCode =
+                                (string)
+                                $objective[
+                                    'objective_code'
+                                ];
+
+                            $objectiveLabel =
+                                $objectiveLabels[
+                                    $objectiveCode
+                                ]
+                                ??
+                                ucwords(
+                                    strtolower(
+                                        str_replace(
+                                            '_',
+                                            ' ',
+                                            $objectiveCode
+                                        )
+                                    )
+                                );
+
+                            ?>
+
+                            <span class="review-tag">
+
+                                <span class="review-tag-check">
+                                    &#10003;
+                                </span>
+
+                                <?= e(
+                                    $objectiveLabel
+                                ) ?>
+
+                            </span>
+
+                        <?php endforeach; ?>
+
+                    </div>
+
 
                     <?php foreach (
                         $objectives
                         as $objective
                     ): ?>
 
-                        <?php
-
-                        $objectiveCode =
+                        <?php if (
                             (string)
-                            $objective['objective_code'];
+                            $objective[
+                                'objective_code'
+                            ] === 'OTHER' &&
+                            hasValue(
+                                $objective[
+                                    'description'
+                                ] ?? ''
+                            )
+                        ): ?>
 
-                        $objectiveLabel =
-                            $objectiveLabels[$objectiveCode]
-                            ??
-                            ucwords(
-                                strtolower(
-                                    str_replace(
-                                        '_',
-                                        ' ',
-                                        $objectiveCode
-                                    )
-                                )
-                            );
-
-                        ?>
-
-                        <div
-                            class="checkbox-option"
-                            style="cursor: default;"
-                        >
-
-                            <span
+                            <div
                                 style="
-                                    color: var(--green);
-                                    font-weight: 800;
+                                    margin-top: 17px;
+                                    padding: 14px 16px;
+                                    background: var(--soft-bg);
+                                    border: 1px solid var(--border);
+                                    border-left: 4px solid var(--gold);
+                                    border-radius: var(--radius);
                                 "
                             >
-                                &#10003;
-                            </span>
 
-                            <span>
-                                <?= e($objectiveLabel) ?>
-                            </span>
+                                <span class="review-field-label">
+                                    Any Other — Description
+                                </span>
 
-                        </div>
+                                <span
+                                    class="review-field-value"
+                                    style="
+                                        white-space: pre-wrap;
+                                    "
+                                >
+                                    <?= e(
+                                        (string)
+                                        $objective[
+                                            'description'
+                                        ]
+                                    ) ?>
+                                </span>
+
+                            </div>
+
+                        <?php endif; ?>
 
                     <?php endforeach; ?>
 
-                </div>
 
+                <?php else: ?>
 
-                <?php foreach (
-                    $objectives
-                    as $objective
-                ): ?>
+                    <span class="text-muted">
+                        No public benefit purposes selected.
+                    </span>
 
-                    <?php if (
-                        $objective['objective_code'] ===
-                        'OTHER'
-                    ): ?>
+                <?php endif; ?>
 
-                        <div
-                            style="
-                                margin-top: 18px;
-                                padding: 15px 17px;
-                                background: var(--soft-bg);
-                                border: 1px solid var(--border);
-                                border-left: 4px solid var(--gold);
-                                border-radius: var(--radius);
-                            "
-                        >
-
-                            <span class="section-eyebrow">
-                                Any Other
-                            </span>
-
-                            <strong
-                                style="
-                                    display: block;
-                                    color: var(--heading);
-                                "
-                            >
-                                If so, Describe
-                            </strong>
-
-                            <p
-                                style="
-                                    margin: 5px 0 0;
-                                    white-space: pre-wrap;
-                                "
-                            >
-                                <?= e(
-                                    (string)
-                                    $objective['description']
-                                ) ?>
-                            </p>
-
-                        </div>
-
-                    <?php endif; ?>
-
-                <?php endforeach; ?>
-
-
-            <?php else: ?>
-
-                <p class="text-muted">
-                    No public benefit purposes have been selected.
-                </p>
-
-            <?php endif; ?>
+            </div>
 
         </section>
 
@@ -2094,31 +2577,35 @@ require_once __DIR__ . '/../includes/header.php';
              3. BENEFICIARIES
              ====================================================== -->
 
-        <section class="application-section">
+        <section class="review-section">
 
-            <div class="application-section-heading">
+            <div class="review-section-header">
 
-                <div class="application-section-number">
-                    3
-                </div>
+                <div class="review-section-heading">
 
-                <div style="flex: 1;">
+                    <div class="review-number">
+                        3
+                    </div>
 
-                    <h2>
-                        Beneficiaries
-                    </h2>
+                    <div>
 
-                    <p>
-                        Persons or groups benefiting from the
-                        organization's activities.
-                    </p>
+                        <h2>
+                            Beneficiaries
+                        </h2>
+
+                        <p>
+                            Persons or groups benefiting from the organization's activities.
+                        </p>
+
+                    </div>
 
                 </div>
 
 
                 <a
                     href="/pbo-portal/applications/beneficiaries.php?id=<?= urlencode(
-                        (string) $applicationId
+                        (string)
+                        $applicationId
                     ) ?>"
                     class="btn btn-secondary btn-sm"
                 >
@@ -2128,256 +2615,299 @@ require_once __DIR__ . '/../includes/header.php';
             </div>
 
 
-            <?php
+            <div class="review-section-body">
 
-            $isPublic = false;
+                <?php
 
-            foreach ($beneficiaries as $beneficiary) {
+                $isPublic =
+                    false;
 
-                if (
-                    $beneficiary['beneficiary_code'] ===
-                    'PUBLIC'
+                foreach (
+                    $beneficiaries
+                    as $beneficiary
                 ) {
 
-                    $isPublic = true;
-                    break;
+                    if (
+                        (string)
+                        $beneficiary[
+                            'beneficiary_code'
+                        ] === 'PUBLIC'
+                    ) {
+
+                        $isPublic =
+                            true;
+
+                        break;
+                    }
                 }
-            }
 
-            ?>
-
-
-            <?php if ($isPublic): ?>
-
-                <div class="admin-info">
-
-                    Beneficiary Category:
-
-                    <strong>
-                        Public
-                    </strong>
-
-                </div>
-
-            <?php elseif ($beneficiaries !== []): ?>
-
-                <div class="admin-info">
-
-                    Beneficiary Category:
-
-                    <strong>
-                        Section of the Public
-                    </strong>
-
-                </div>
+                ?>
 
 
-                <div
-                    class="checkbox-group"
-                    style="
-                        display: grid;
-                        grid-template-columns:
-                            repeat(
-                                auto-fit,
-                                minmax(250px, 1fr)
-                            );
-                        gap: 10px;
-                    "
-                >
+                <?php if ($isPublic): ?>
+
+                    <div
+                        style="
+                            padding: 15px 17px;
+                            background: var(--soft-bg);
+                            border: 1px solid var(--border);
+                            border-radius: var(--radius);
+                        "
+                    >
+
+                        <span class="review-field-label">
+                            Beneficiary Category
+                        </span>
+
+                        <span class="review-field-value">
+                            Public
+                        </span>
+
+                    </div>
+
+
+                <?php elseif (
+                    $beneficiaries !== []
+                ): ?>
+
+                    <div
+                        style="
+                            margin-bottom: 16px;
+                        "
+                    >
+
+                        <span class="review-field-label">
+                            Beneficiary Category
+                        </span>
+
+                        <span class="review-field-value">
+                            Section of the Public
+                        </span>
+
+                    </div>
+
+
+                    <div class="review-tags">
+
+                        <?php foreach (
+                            $beneficiaries
+                            as $beneficiary
+                        ): ?>
+
+                            <?php
+
+                            $beneficiaryCode =
+                                (string)
+                                $beneficiary[
+                                    'beneficiary_code'
+                                ];
+
+
+                            if (
+                                $beneficiaryCode ===
+                                'PUBLIC'
+                            ) {
+                                continue;
+                            }
+
+
+                            $beneficiaryLabel =
+                                $beneficiaryLabels[
+                                    $beneficiaryCode
+                                ]
+                                ??
+                                ucwords(
+                                    strtolower(
+                                        str_replace(
+                                            '_',
+                                            ' ',
+                                            $beneficiaryCode
+                                        )
+                                    )
+                                );
+
+                            ?>
+
+                            <span class="review-tag">
+
+                                <span class="review-tag-check">
+                                    &#10003;
+                                </span>
+
+                                <?= e(
+                                    $beneficiaryLabel
+                                ) ?>
+
+                            </span>
+
+                        <?php endforeach; ?>
+
+                    </div>
+
 
                     <?php foreach (
                         $beneficiaries
                         as $beneficiary
                     ): ?>
 
-                        <?php
-
-                        $beneficiaryCode =
+                        <?php if (
                             (string)
                             $beneficiary[
                                 'beneficiary_code'
-                            ];
+                            ] === 'OTHER'
+                        ): ?>
 
-                        if (
-                            $beneficiaryCode ===
-                            'PUBLIC'
-                        ) {
-                            continue;
-                        }
+                            <?php
 
-                        $beneficiaryLabel =
-                            $beneficiaryLabels[
-                                $beneficiaryCode
-                            ]
-                            ??
-                            ucwords(
-                                strtolower(
-                                    str_replace(
-                                        '_',
-                                        ' ',
-                                        $beneficiaryCode
+                            $otherSpecify = '';
+                            $otherDescription = '';
+
+                            $storedOther =
+                                trim(
+                                    (string)
+                                    (
+                                        $beneficiary[
+                                            'description'
+                                        ] ?? ''
                                     )
-                                )
-                            );
+                                );
 
-                        ?>
 
-                                               <div
-                            class="checkbox-option"
-                            style="cursor: default;"
-                        >
+                            if (
+                                $storedOther !== ''
+                            ) {
 
-                            <span
-                                style="
-                                    color: var(--green);
-                                    font-weight: 800;
-                                "
-                            >
-                                &#10003;
-                            </span>
+                                $decodedOther =
+                                    json_decode(
+                                        $storedOther,
+                                        true
+                                    );
 
-                            <span>
-                                <?= e($beneficiaryLabel) ?>
-                            </span>
 
-                        </div>
+                                if (
+                                    is_array(
+                                        $decodedOther
+                                    )
+                                ) {
+
+                                    $otherSpecify =
+                                        trim(
+                                            (string)
+                                            (
+                                                $decodedOther[
+                                                    'specify'
+                                                ] ?? ''
+                                            )
+                                        );
+
+                                    $otherDescription =
+                                        trim(
+                                            (string)
+                                            (
+                                                $decodedOther[
+                                                    'description'
+                                                ] ?? ''
+                                            )
+                                        );
+
+                                } else {
+
+                                    $otherDescription =
+                                        $storedOther;
+                                }
+                            }
+
+                            ?>
+
+
+                            <?php if (
+                                $otherSpecify !== '' ||
+                                $otherDescription !== ''
+                            ): ?>
+
+                                <div
+                                    style="
+                                        margin-top: 17px;
+                                        padding: 15px 17px;
+                                        background: var(--soft-bg);
+                                        border: 1px solid var(--border);
+                                        border-left: 4px solid var(--gold);
+                                        border-radius: var(--radius);
+                                    "
+                                >
+
+                                    <?php if (
+                                        $otherSpecify !== ''
+                                    ): ?>
+
+                                        <div class="review-field">
+
+                                            <span class="review-field-label">
+                                                Others — Specify
+                                            </span>
+
+                                            <span class="review-field-value">
+                                                <?= e(
+                                                    $otherSpecify
+                                                ) ?>
+                                            </span>
+
+                                        </div>
+
+                                    <?php endif; ?>
+
+
+                                    <?php if (
+                                        $otherDescription !== ''
+                                    ): ?>
+
+                                        <div
+                                            class="review-field"
+                                            style="
+                                                margin-top:
+                                                <?= $otherSpecify !== ''
+                                                    ? '13px'
+                                                    : '0' ?>;
+                                            "
+                                        >
+
+                                            <span class="review-field-label">
+                                                Description
+                                            </span>
+
+                                            <span
+                                                class="review-field-value"
+                                                style="
+                                                    white-space: pre-wrap;
+                                                "
+                                            >
+                                                <?= e(
+                                                    $otherDescription
+                                                ) ?>
+                                            </span>
+
+                                        </div>
+
+                                    <?php endif; ?>
+
+                                </div>
+
+                            <?php endif; ?>
+
+                        <?php endif; ?>
 
                     <?php endforeach; ?>
 
-                </div>
 
+                <?php else: ?>
 
-                <!-- ==============================================
-                     OTHER BENEFICIARY DETAILS
-                     ============================================== -->
+                    <span class="text-muted">
+                        Beneficiary information has not been entered.
+                    </span>
 
-                <?php foreach ($beneficiaries as $beneficiary): ?>
+                <?php endif; ?>
 
-                    <?php if (
-                        (string) $beneficiary['beneficiary_code'] === 'OTHER'
-                    ): ?>
-
-                        <?php
-
-                        $otherSpecify = '';
-                        $otherDescription = '';
-
-                        $storedOther = trim(
-                            (string) ($beneficiary['description'] ?? '')
-                        );
-
-                        /*
-                        |--------------------------------------------------------------------------
-                        | beneficiaries.php stores OTHER as JSON:
-                        |
-                        | {
-                        |     "specify": "...",
-                        |     "description": "..."
-                        | }
-                        |--------------------------------------------------------------------------
-                        */
-
-                        if ($storedOther !== '') {
-
-                            $decodedOther = json_decode(
-                                $storedOther,
-                                true
-                            );
-
-                            if (is_array($decodedOther)) {
-
-                                $otherSpecify = trim(
-                                    (string) ($decodedOther['specify'] ?? '')
-                                );
-
-                                $otherDescription = trim(
-                                    (string) ($decodedOther['description'] ?? '')
-                                );
-
-                            } else {
-
-                                /*
-                                | Backward compatibility with older
-                                | plain-text records.
-                                */
-
-                                $otherDescription = $storedOther;
-                            }
-                        }
-
-                        ?>
-
-
-                        <div
-                            style="
-                                margin-top: 18px;
-                                padding: 17px;
-                                background: var(--soft-bg);
-                                border: 1px solid var(--border);
-                                border-left: 4px solid var(--gold);
-                                border-radius: var(--radius);
-                            "
-                        >
-
-                            <span class="section-eyebrow">
-                                Others Not Listed Here
-                            </span>
-
-
-                            <div
-                                class="record-grid"
-                                style="margin-top: 10px;"
-                            >
-
-                                <div class="record-field">
-
-                                    <span>
-                                        Specify
-                                    </span>
-
-                                    <strong>
-                                        <?= displayValue(
-                                            $otherSpecify
-                                        ) ?>
-                                    </strong>
-
-                                </div>
-
-
-                                <div class="record-field">
-
-                                    <span>
-                                        If so, Describe
-                                    </span>
-
-                                    <strong
-                                        style="
-                                            white-space: pre-wrap;
-                                        "
-                                    >
-                                        <?= displayValue(
-                                            $otherDescription
-                                        ) ?>
-                                    </strong>
-
-                                </div>
-
-                            </div>
-
-                        </div>
-
-                    <?php endif; ?>
-
-                <?php endforeach; ?>
-
-
-            <?php else: ?>
-
-                <p class="text-muted">
-                    Beneficiary information has not been entered.
-                </p>
-
-            <?php endif; ?>
+            </div>
 
         </section>
 
@@ -2386,30 +2916,35 @@ require_once __DIR__ . '/../includes/header.php';
              4. FINANCIAL YEAR
              ====================================================== -->
 
-        <section class="application-section">
+        <section class="review-section">
 
-            <div class="application-section-heading">
+            <div class="review-section-header">
 
-                <div class="application-section-number">
-                    4
-                </div>
+                <div class="review-section-heading">
 
-                <div style="flex: 1;">
+                    <div class="review-number">
+                        4
+                    </div>
 
-                    <h2>
-                        Financial Year
-                    </h2>
+                    <div>
 
-                    <p>
-                        Start and end of the organization's financial year.
-                    </p>
+                        <h2>
+                            Financial Year
+                        </h2>
+
+                        <p>
+                            Approved twelve-month financial period.
+                        </p>
+
+                    </div>
 
                 </div>
 
 
                 <a
                     href="/pbo-portal/applications/financial-year.php?id=<?= urlencode(
-                        (string) $applicationId
+                        (string)
+                        $applicationId
                     ) ?>"
                     class="btn btn-secondary btn-sm"
                 >
@@ -2419,95 +2954,103 @@ require_once __DIR__ . '/../includes/header.php';
             </div>
 
 
-            <?php if (
-                isset($months[$startMonth]) &&
-                isset($months[$endMonth])
-            ): ?>
+            <div class="review-section-body">
 
-                <div
-                    style="
-                        padding: 20px;
-                        background:
-                            linear-gradient(
-                                100deg,
-                                var(--blue-light),
-                                #ffffff
-                            );
-                        border: 1px solid #d2e0ec;
-                        border-left: 4px solid var(--blue);
-                        border-radius: var(--radius);
-                    "
-                >
+                <?php if (
+                    isset(
+                        $months[
+                            $startMonth
+                        ]
+                    ) &&
+                    isset(
+                        $months[
+                            $endMonth
+                        ]
+                    )
+                ): ?>
 
-                    <span
+                    <div
                         style="
-                            display: block;
-                            margin-bottom: 5px;
-                            color: var(--text-muted);
-                            font-size: 10px;
-                            font-weight: 800;
-                            letter-spacing: .6px;
-                            text-transform: uppercase;
+                            padding: 18px 20px;
+                            background:
+                                linear-gradient(
+                                    100deg,
+                                    var(--blue-light),
+                                    #ffffff
+                                );
+                            border: 1px solid #d2e0ec;
+                            border-left: 4px solid var(--blue);
+                            border-radius: var(--radius);
                         "
                     >
-                        Selected Financial Year
-                    </span>
 
-                    <strong
-                        style="
-                            color: var(--blue-dark);
-                            font-size: 20px;
-                        "
-                    >
-                        <?= e($months[$startMonth]) ?>
-                        &nbsp;&mdash;&nbsp;
-                        <?= e($months[$endMonth]) ?>
-                    </strong>
+                        <span class="review-field-label">
+                            Selected Financial Year
+                        </span>
 
-                </div>
+                        <strong
+                            style="
+                                color: var(--blue-dark);
+                                font-size: 20px;
+                            "
+                        >
+                            <?= e(
+                                $months[
+                                    $startMonth
+                                ]
+                            ) ?>
 
-            <?php else: ?>
+                            &nbsp;&mdash;&nbsp;
 
-                <div class="alert alert-warning">
+                            <?= e(
+                                $months[
+                                    $endMonth
+                                ]
+                            ) ?>
+                        </strong>
 
-                    Financial year information has not been completed.
+                    </div>
 
-                </div>
+                <?php endif; ?>
 
-            <?php endif; ?>
+            </div>
 
         </section>
 
 
         <!-- ======================================================
-             5. OFFICIALS AND DIRECTORS
+             5. PRINCIPAL OFFICIALS
              ====================================================== -->
 
-        <section class="application-section">
+        <section class="review-section">
 
-            <div class="application-section-heading">
+            <div class="review-section-header">
 
-                <div class="application-section-number">
-                    5
-                </div>
+                <div class="review-section-heading">
 
-                <div style="flex: 1;">
+                    <div class="review-number">
+                        5
+                    </div>
 
-                    <h2>
-                        Officials and Directors
-                    </h2>
+                    <div>
 
-                    <p>
-                        Personal particulars of the Chairperson,
-                        Treasurer, Secretary and additional Directors.
-                    </p>
+                        <h2>
+                            Principal Officials
+                        </h2>
+
+                        <p>
+                            Chairperson, Treasurer and Secretary.
+                        </p>
+
+                    </div>
 
                 </div>
 
 
                 <a
                     href="/pbo-portal/applications/officials.php?id=<?= urlencode(
-                        (string) $applicationId
+                        (string)
+                        $applicationId
                     ) ?>"
                     class="btn btn-secondary btn-sm"
                 >
@@ -2517,217 +3060,180 @@ require_once __DIR__ . '/../includes/header.php';
             </div>
 
 
-            <?php if ($officials !== []): ?>
+            <div class="review-section-body">
 
-                <div class="admin-info">
+                <div class="official-grid">
 
-                    Total officials/directors captured:
-
-                    <strong>
-                        <?= count($officials) ?>
-                    </strong>
-
-                </div>
-
-
-                <div
-                    style="
-                        display: grid;
-                        grid-template-columns:
-                            repeat(
-                                auto-fit,
-                                minmax(330px, 1fr)
-                            );
-                        gap: 17px;
-                    "
-                >
-
-                    <?php foreach ($officials as $official): ?>
+                    <?php foreach (
+                        [
+                            'CHAIRPERSON',
+                            'TREASURER',
+                            'SECRETARY',
+                        ]
+                        as $designation
+                    ): ?>
 
                         <?php
 
-                        $designation = designationLabel(
-                            (string) $official['designation']
-                        );
+                        $official =
+                            $principalOfficials[
+                                $designation
+                            ];
+
+                        if (
+                            $official === null
+                        ) {
+                            continue;
+                        }
 
                         ?>
 
+                        <article class="official-card">
 
-                        <article
-                            style="
-                                overflow: hidden;
-                                background: var(--white);
-                                border: 1px solid var(--border);
-                                border-radius: var(--radius);
-                                box-shadow: var(--shadow-sm);
-                            "
-                        >
+                            <div class="official-card-header">
 
-
-                            <!-- OFFICIAL HEADER -->
-
-                            <div
-                                style="
-                                    padding: 14px 17px;
-                                    background:
-                                        linear-gradient(
-                                            100deg,
-                                            var(--blue-light),
-                                            #ffffff
-                                        );
-                                    border-bottom: 1px solid var(--border);
-                                "
-                            >
-
-                                <span class="section-eyebrow">
-                                    Official / Director
+                                <span>
+                                    Principal Official
                                 </span>
 
-                                <h3
-                                    style="
-                                        margin: 0;
-                                        color: var(--blue-dark);
-                                    "
-                                >
-                                    <?= e($designation) ?>
+                                <h3>
+                                    <?= e(
+                                        designationLabel(
+                                            $designation
+                                        )
+                                    ) ?>
                                 </h3>
 
                             </div>
 
 
-                            <!-- OFFICIAL DETAILS -->
+                            <div class="official-card-body">
 
-                            <div style="padding: 17px;">
+                                <div class="review-grid">
 
-                                <div class="record-grid">
+                                    <div class="review-field">
 
-
-                                    <div class="record-field">
-
-                                        <span>
+                                        <span class="review-field-label">
                                             Name
                                         </span>
 
-                                        <strong>
-                                            <?= displayValue(
-                                                $official['full_name']
+                                        <span class="review-field-value">
+                                            <?= e(
+                                                (string)
+                                                $official[
+                                                    'full_name'
+                                                ]
                                             ) ?>
-                                        </strong>
+                                        </span>
 
                                     </div>
 
 
-                                    <div class="record-field">
+                                    <div class="review-field">
 
-                                        <span>
+                                        <span class="review-field-label">
                                             Nationality
                                         </span>
 
-                                        <strong>
-                                            <?= displayValue(
-                                                $official['nationality']
+                                        <span class="review-field-value">
+                                            <?= e(
+                                                (string)
+                                                $official[
+                                                    'nationality'
+                                                ]
                                             ) ?>
-                                        </strong>
-
-                                    </div>
-
-
-                                    <div class="record-field">
-
-                                        <span>
-                                            ID / Passport Number
                                         </span>
 
-                                        <strong>
-                                            <?= displayValue(
-                                                $official['id_passport_number']
+                                    </div>
+
+
+                                    <div class="review-field">
+
+                                        <span class="review-field-label">
+                                            ID / Passport
+                                        </span>
+
+                                        <span class="review-field-value">
+                                            <?= e(
+                                                (string)
+                                                $official[
+                                                    'id_passport_number'
+                                                ]
                                             ) ?>
-                                        </strong>
+                                        </span>
 
                                     </div>
 
 
-                                    <div class="record-field">
+                                    <div class="review-field">
 
-                                        <span>
+                                        <span class="review-field-label">
                                             KRA PIN
                                         </span>
 
-                                        <strong>
-                                            <?= displayValue(
-                                                $official['kra_pin']
+                                        <span class="review-field-value">
+                                            <?= e(
+                                                (string)
+                                                $official[
+                                                    'kra_pin'
+                                                ]
                                             ) ?>
-                                        </strong>
-
-                                    </div>
-
-
-                                    <div class="record-field">
-
-                                        <span>
-                                            Phone Number
                                         </span>
 
-                                        <strong>
-                                            <?= displayValue(
-                                                $official['phone_number']
+                                    </div>
+
+
+                                    <div class="review-field">
+
+                                        <span class="review-field-label">
+                                            Phone
+                                        </span>
+
+                                        <span class="review-field-value">
+                                            <?= e(
+                                                (string)
+                                                $official[
+                                                    'phone_number'
+                                                ]
                                             ) ?>
-                                        </strong>
+                                        </span>
 
                                     </div>
 
 
-                                    <div class="record-field">
+                                    <div class="review-field">
 
-                                        <span>
+                                        <span class="review-field-label">
                                             Email
                                         </span>
 
-                                        <strong>
-                                            <?= displayValue(
-                                                $official['email']
-                                            ) ?>
-                                        </strong>
-
-                                    </div>
-
-
-                                    <div class="record-field">
-
-                                        <span>
-                                            Signature
-                                        </span>
-
-                                        <?php if (
-                                            trim(
+                                        <span class="review-field-value">
+                                            <?= e(
                                                 (string)
-                                                ($official['signature'] ?? '')
-                                            ) !== ''
-                                        ): ?>
-
-                                            <strong
-                                                style="
-                                                    color: var(--green);
-                                                "
-                                            >
-                                                &#10003; Provided
-                                            </strong>
-
-                                        <?php else: ?>
-
-                                            <strong
-                                                style="
-                                                    color: var(--red);
-                                                "
-                                            >
-                                                Missing
-                                            </strong>
-
-                                        <?php endif; ?>
+                                                $official[
+                                                    'email'
+                                                ]
+                                            ) ?>
+                                        </span>
 
                                     </div>
 
                                 </div>
+
+
+                                <?php if (
+                                    hasValue(
+                                        $official[
+                                            'signature'
+                                        ] ?? ''
+                                    )
+                                ): ?>
+
+                                    <div class="signature-on-file">
+                                        &#10003; Signature on file
+                                    </div>
+
+                                <?php endif; ?>
 
                             </div>
 
@@ -2737,21 +3243,198 @@ require_once __DIR__ . '/../includes/header.php';
 
                 </div>
 
-            <?php else: ?>
 
-                <div class="alert alert-warning">
+                <!-- Optional Directors -->
 
-                    Officials and Directors have not been entered.
+                <?php if (
+                    $directors !== []
+                ): ?>
 
-                </div>
+                    <div class="optional-block">
 
-            <?php endif; ?>
+                        <h3 class="optional-block-title">
+                            Additional Directors
+                            <span
+                                style="
+                                    margin-left: 6px;
+                                    color: var(--text-muted);
+                                    font-size: 10px;
+                                    font-weight: 700;
+                                "
+                            >
+                                Optional
+                            </span>
+                        </h3>
+
+
+                        <div class="official-grid">
+
+                            <?php foreach (
+                                $directors
+                                as $index => $director
+                            ): ?>
+
+                                <article class="official-card">
+
+                                    <div class="official-card-header">
+
+                                        <span>
+                                            Additional Director
+                                        </span>
+
+                                        <h3>
+                                            Director <?= $index + 1 ?>
+                                        </h3>
+
+                                    </div>
+
+
+                                    <div class="official-card-body">
+
+                                        <div class="review-grid">
+
+                                            <div class="review-field">
+
+                                                <span class="review-field-label">
+                                                    Name
+                                                </span>
+
+                                                <span class="review-field-value">
+                                                    <?= e(
+                                                        (string)
+                                                        $director[
+                                                            'full_name'
+                                                        ]
+                                                    ) ?>
+                                                </span>
+
+                                            </div>
+
+
+                                            <div class="review-field">
+
+                                                <span class="review-field-label">
+                                                    Nationality
+                                                </span>
+
+                                                <span class="review-field-value">
+                                                    <?= e(
+                                                        (string)
+                                                        $director[
+                                                            'nationality'
+                                                        ]
+                                                    ) ?>
+                                                </span>
+
+                                            </div>
+
+
+                                            <div class="review-field">
+
+                                                <span class="                                                    ID / Passport
+                                                </span>
+
+                                                <span class="review-field-value">
+                                                    <?= e(
+                                                        (string)
+                                                        $director[
+                                                            'id_passport_number'
+                                                        ]
+                                                    ) ?>
+                                                </span>
+
+                                            </div>
+
+
+                                            <div class="review-field">
+
+                                                <span class="review-field-label">
+                                                    KRA PIN
+                                                </span>
+
+                                                <span class="review-field-value">
+                                                    <?= e(
+                                                        (string)
+                                                        $director[
+                                                            'kra_pin'
+                                                        ]
+                                                    ) ?>
+                                                </span>
+
+                                            </div>
+
+
+                                            <div class="review-field">
+
+                                                <span class="review-field-label">
+                                                    Phone
+                                                </span>
+
+                                                <span class="review-field-value">
+                                                    <?= e(
+                                                        (string)
+                                                        $director[
+                                                            'phone_number'
+                                                        ]
+                                                    ) ?>
+                                                </span>
+
+                                            </div>
+
+
+                                            <div class="review-field">
+
+                                                <span class="review-field-label">
+                                                    Email
+                                                </span>
+
+                                                <span class="review-field-value">
+                                                    <?= e(
+                                                        (string)
+                                                        $director[
+                                                            'email'
+                                                        ]
+                                                    ) ?>
+                                                </span>
+
+                                            </div>
+
+                                        </div>
+
+
+                                        <?php if (
+                                            hasValue(
+                                                $director[
+                                                    'signature'
+                                                ] ?? ''
+                                            )
+                                        ): ?>
+
+                                            <div class="signature-on-file">
+                                                &#10003; Signature on file
+                                            </div>
+
+                                        <?php endif; ?>
+
+                                    </div>
+
+                                </article>
+
+                            <?php endforeach; ?>
+
+                        </div>
+
+                    </div>
+
+                <?php endif; ?>
+
+            </div>
 
         </section>
 
 
     </div>
-    <!-- END .application-form -->
+    <!-- END .review-shell -->
 
 
     <!-- ==========================================================
@@ -2762,19 +3445,24 @@ require_once __DIR__ . '/../includes/header.php';
         method="post"
         action=""
         id="submit-application-form"
-        style="margin-top: 22px;"
+        style="
+            margin-top: 22px;
+        "
     >
 
         <input
             type="hidden"
             name="csrf_token"
-            value="<?= e($csrfToken) ?>"
+            value="<?= e(
+                $csrfToken
+            ) ?>"
         >
 
         <input
             type="hidden"
             name="application_id"
-            value="<?= (int) $applicationId ?>"
+            value="<?= (int)
+                $applicationId ?>"
         >
 
 
@@ -2788,8 +3476,7 @@ require_once __DIR__ . '/../includes/header.php';
             "
         >
 
-
-            <!-- SUBMISSION HEADER -->
+            <!-- FINAL SUBMISSION HEADER -->
 
             <div
                 style="
@@ -2800,8 +3487,10 @@ require_once __DIR__ . '/../includes/header.php';
                             var(--gold-light),
                             #ffffff
                         );
-                    border-top: 4px solid var(--gold);
-                    border-bottom: 1px solid var(--border);
+                    border-top:
+                        4px solid var(--gold);
+                    border-bottom:
+                        1px solid var(--border);
                 "
             >
 
@@ -2832,12 +3521,17 @@ require_once __DIR__ . '/../includes/header.php';
             </div>
 
 
-            <!-- SUBMISSION BODY -->
+            <!-- FINAL SUBMISSION BODY -->
 
-            <div style="padding: 24px;">
+            <div
+                style="
+                    padding: 24px;
+                "
+            >
 
-
-                <?php if ($completionErrors === []): ?>
+                <?php if (
+                    $completionErrors === []
+                ): ?>
 
                     <div
                         style="
@@ -2845,7 +3539,8 @@ require_once __DIR__ . '/../includes/header.php';
                             padding: 17px;
                             background: var(--green-light);
                             border: 1px solid #c3dfce;
-                            border-left: 4px solid var(--green);
+                            border-left:
+                                4px solid var(--green);
                             border-radius: var(--radius);
                         "
                     >
@@ -2866,8 +3561,8 @@ require_once __DIR__ . '/../includes/header.php';
                                 font-size: 12px;
                             "
                         >
-                            All required sections have passed the
-                            application completeness check.
+                            All required application information
+                            has passed the completeness check.
                         </span>
 
                     </div>
@@ -2902,9 +3597,9 @@ require_once __DIR__ . '/../includes/header.php';
                                 Final Confirmation
                             </strong>
 
-                            I confirm that I have reviewed the information
-                            recorded in this application and that it is
-                            ready for submission.
+                            I confirm that I have reviewed the
+                            information recorded in this application
+                            and that it is ready for submission.
 
                         </span>
 
@@ -2919,10 +3614,14 @@ require_once __DIR__ . '/../includes/header.php';
                             Submission unavailable.
                         </strong>
 
-                        <p style="margin: 6px 0 0;">
-                            Complete or correct the outstanding items
-                            identified above before submitting this
-                            application.
+                        <p
+                            style="
+                                margin: 6px 0 0;
+                            "
+                        >
+                            Complete or correct the outstanding
+                            required information identified above
+                            before submitting this application.
                         </p>
 
                     </div>
@@ -2932,7 +3631,7 @@ require_once __DIR__ . '/../includes/header.php';
             </div>
 
 
-            <!-- SUBMISSION ACTIONS -->
+            <!-- FINAL ACTIONS -->
 
             <div class="application-actions">
 
@@ -2940,7 +3639,8 @@ require_once __DIR__ . '/../includes/header.php';
 
                     <a
                         href="/pbo-portal/applications/officials.php?id=<?= urlencode(
-                            (string) $applicationId
+                            (string)
+                            $applicationId
                         ) ?>"
                         class="btn btn-secondary"
                     >
@@ -3014,12 +3714,8 @@ require_once __DIR__ . '/../includes/header.php';
 
     /*
     |--------------------------------------------------------------------------
-    | Application may be incomplete
+    | Incomplete application
     |--------------------------------------------------------------------------
-    |
-    | In that case the confirmation checkbox is not rendered and
-    | the submit button is disabled.
-    |
     */
 
     if (
@@ -3030,7 +3726,6 @@ require_once __DIR__ . '/../includes/header.php';
     ) {
 
         return;
-
     }
 
 
@@ -3046,26 +3741,33 @@ require_once __DIR__ . '/../includes/header.php';
 
 
             /*
-            | Require confirmation.
+            |--------------------------------------------------------------------------
+            | Confirmation required
+            |--------------------------------------------------------------------------
             */
 
-            if (!confirmation.checked) {
+            if (
+                !confirmation.checked
+            ) {
 
                 event.preventDefault();
+
 
                 alert(
                     'Please confirm that you have reviewed the application before submitting.'
                 );
 
+
                 confirmation.focus();
 
                 return;
-
             }
 
 
             /*
-            | Native validation.
+            |--------------------------------------------------------------------------
+            | Native validation
+            |--------------------------------------------------------------------------
             */
 
             if (!form.checkValidity()) {
@@ -3075,13 +3777,12 @@ require_once __DIR__ . '/../includes/header.php';
                 form.reportValidity();
 
                 return;
-
             }
 
 
             /*
             |--------------------------------------------------------------------------
-            | Final confirmation
+            | Final irreversible-action confirmation
             |--------------------------------------------------------------------------
             */
 
@@ -3098,19 +3799,21 @@ require_once __DIR__ . '/../includes/header.php';
                 event.preventDefault();
 
                 return;
-
             }
 
 
             /*
-            | Prevent double submission.
+            |--------------------------------------------------------------------------
+            | Prevent duplicate submission
+            |--------------------------------------------------------------------------
             */
 
-            submitButton.disabled = true;
+            submitButton.disabled =
+                true;
+
 
             submitButton.textContent =
                 'Submitting...';
-
         }
     );
 
@@ -3126,6 +3829,7 @@ require_once __DIR__ . '/../includes/header.php';
 |--------------------------------------------------------------------------
 */
 
-require_once __DIR__ . '/../includes/footer.php';
+require_once __DIR__ .
+    '/../includes/footer.php';
 
 ?>

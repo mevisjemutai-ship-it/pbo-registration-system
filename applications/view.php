@@ -1,5 +1,4 @@
 <?php
-
 declare(strict_types=1);
 
 require_once __DIR__ . '/../config/database.php';
@@ -8,58 +7,21 @@ require_once __DIR__ . '/../includes/auth.php';
 requireLogin();
 requirePasswordChanged();
 
-
-/*
-|--------------------------------------------------------------------------
-| Page configuration
-|--------------------------------------------------------------------------
-*/
-
-$pageTitle = 'View Application';
+$pageTitle  = 'PBO Registration Record';
 $activePage = 'applications';
 
-
 /*
 |--------------------------------------------------------------------------
-| Database
+| Database connection
 |--------------------------------------------------------------------------
 */
-
-$connection = null;
 
 if (isset($pdo) && $pdo instanceof PDO) {
-
-    $connection = $pdo;
-
+    $db = $pdo;
 } elseif (isset($db) && $db instanceof PDO) {
-
-    $connection = $db;
-}
-
-if (!$connection instanceof PDO) {
-
-    throw new RuntimeException(
-        'Database connection was not initialized as a PDO instance.'
-    );
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Current user
-|--------------------------------------------------------------------------
-*/
-
-$userId =
-    (int) ($_SESSION['user_id'] ?? 0);
-
-if ($userId <= 0) {
-
-    header(
-        'Location: /pbo-portal/login.php'
-    );
-
-    exit;
+    // Existing connection supplied by database.php.
+} else {
+    throw new RuntimeException('Database connection is not available.');
 }
 
 
@@ -72,104 +34,81 @@ if ($userId <= 0) {
 function e(?string $value): string
 {
     return htmlspecialchars(
-        $value ?? '',
-        ENT_QUOTES | ENT_SUBSTITUTE,
+        (string) $value,
+        ENT_QUOTES,
         'UTF-8'
     );
 }
 
+function hasValue(mixed $value): bool
+{
+    return trim((string) $value) !== '';
+}
 
 function displayValue(mixed $value): string
 {
-    $value =
-        trim(
-            (string) $value
-        );
-
-    return $value !== ''
-        ? e($value)
-        : '<span class="text-muted">Not provided</span>';
+    return hasValue($value)
+        ? e((string) $value)
+        : '—';
 }
 
-
-function organizationTypeLabel(
-    string $type
-): string {
-
-    return match ($type) {
-
-        'national'
-            => 'National',
-
-        'international'
-            => 'International',
-
-        default
-            => ucwords(
-                str_replace(
-                    '_',
-                    ' ',
-                    $type
-                )
-            ),
+function organizationTypeLabel(string $type): string
+{
+    return match (strtolower(trim($type))) {
+        'national' => 'National Organization',
+        'international' => 'International Organization',
+        'international_exempt' => 'International Organization — Exempt',
+        default => ucwords(
+            strtolower(
+                str_replace('_', ' ', trim($type))
+            )
+        ),
     };
 }
 
-
-function designationLabel(
-    string $designation
-): string {
-
-    return match (
-        strtoupper($designation)
-    ) {
-
-        'CHAIRPERSON'
-            => 'Chairperson',
-
-        'TREASURER'
-            => 'Treasurer',
-
-        'SECRETARY'
-            => 'Secretary',
-
-        'DIRECTOR'
-            => 'Director',
-
-        default
-            => ucwords(
-                strtolower(
-                    str_replace(
-                        '_',
-                        ' ',
-                        $designation
-                    )
-                )
-            ),
+function designationLabel(string $designation): string
+{
+    return match (strtoupper(trim($designation))) {
+        'CHAIRPERSON' => 'Chairperson',
+        'TREASURER'   => 'Treasurer',
+        'SECRETARY'   => 'Secretary',
+        'DIRECTOR'    => 'Director',
+        default       => ucwords(
+            strtolower(
+                str_replace('_', ' ', trim($designation))
+            )
+        ),
     };
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| Signature type
-|--------------------------------------------------------------------------
-*/
-
-function signatureExtension(
-    string $path
+function formatDateValue(
+    mixed $value,
+    string $format = 'd F Y'
 ): string {
+    if (!hasValue($value)) {
+        return '';
+    }
 
-    $path =
-        parse_url(
-            $path,
-            PHP_URL_PATH
-        ) ?: $path;
+    try {
+        return (new DateTime((string) $value))->format($format);
+    } catch (Throwable) {
+        return (string) $value;
+    }
+}
 
+function signatureExtension(string $path): string
+{
+    $path = trim($path);
+
+    if ($path === '') {
+        return '';
+    }
+
+    $pathWithoutQuery = explode('?', $path, 2)[0];
 
     return strtolower(
         pathinfo(
-            $path,
+            $pathWithoutQuery,
             PATHINFO_EXTENSION
         )
     );
@@ -178,12 +117,33 @@ function signatureExtension(
 
 /*
 |--------------------------------------------------------------------------
-| Months
+| Application ID
+|--------------------------------------------------------------------------
+*/
+
+$applicationId = filter_input(
+    INPUT_GET,
+    'id',
+    FILTER_VALIDATE_INT
+);
+
+if (
+    $applicationId === false ||
+    $applicationId === null ||
+    $applicationId < 1
+) {
+    http_response_code(400);
+    exit('Invalid application ID.');
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Labels
 |--------------------------------------------------------------------------
 */
 
 $months = [
-
     1  => 'January',
     2  => 'February',
     3  => 'March',
@@ -198,314 +158,140 @@ $months = [
     12 => 'December',
 ];
 
-
-/*
-|--------------------------------------------------------------------------
-| Objective labels
-|--------------------------------------------------------------------------
-*/
-
 $objectiveLabels = [
-
-    'AGRICULTURE'
-        => 'Agriculture',
-
-    'CHILDREN'
-        => 'Children',
-
-    'CULTURE'
-        => 'Culture',
-
-    'DISABILITY'
-        => 'Disability',
-
-    'ENERGY'
-        => 'Energy',
-
-    'EDUCATION'
-        => 'Education',
-
-    'ENVIRONMENTAL_CONSERVATION'
-        => 'Environmental and Conservation',
-
-    'GENDER'
-        => 'Gender',
-
-    'GOVERNANCE'
-        => 'Governance',
-
-    'POVERTY_ERADICATION'
-        => 'Poverty Eradication',
-
-    'HEALTH'
-        => 'Health',
-
-    'HOUSING_SETTLEMENT'
-        => 'Housing & Settlement',
-
-    'HUMAN_RIGHTS'
-        => 'Human Rights',
-
-    'HIV_AIDS'
-        => 'HIV/AIDS',
-
-    'INFORMATION'
-        => 'Information',
-
-    'INFORMAL_SECTOR'
-        => 'Informal Sector',
-
-    'LEGAL_AID'
-        => 'Legal Aid',
-
-    'OLD_AGE'
-        => 'Old Age',
-
-    'PEACE_BUILDING'
-        => 'Peace Building',
-
-    'POPULATION_REPRODUCTIVE_HEALTH'
-        => 'Population & Reproductive Health',
-
-    'REFUGEES'
-        => 'Refugees',
-
-    'DISASTER_PREVENTION'
-        => 'Disaster prevention, preparedness and mitigation',
-
-    'RELIEF_PASTORALISM_MARGINALIZED'
-        => 'Relief Pastoralism and marginalized communities',
-
-    'SPORTS'
-        => 'Sports',
-
-    'WATER_SANITATION'
-        => 'Water and sanitation',
-
-    'ANIMAL_WELFARE'
-        => 'Animal welfare',
-
-    'YOUTH'
-        => 'Youth',
-
-    'OTHER'
-        => 'Any Other',
+    'EDUCATION' => 'Education',
+    'HEALTH' => 'Health',
+    'AGRICULTURE' => 'Agriculture',
+    'ENVIRONMENT' => 'Environment',
+    'GOVERNANCE' => 'Governance',
+    'HUMAN_RIGHTS' => 'Human Rights',
+    'GENDER' => 'Gender',
+    'CHILDREN' => 'Children',
+    'YOUTH' => 'Youth',
+    'DISABILITY' => 'Persons with Disabilities',
+    'ELDERLY' => 'Older Persons',
+    'POVERTY_ERADICATION' => 'Poverty Eradication',
+    'FOOD_SECURITY' => 'Food Security',
+    'WATER_AND_SANITATION' => 'Water and Sanitation',
+    'HOUSING' => 'Housing',
+    'LIVELIHOODS' => 'Livelihoods',
+    'ECONOMIC_EMPOWERMENT' => 'Economic Empowerment',
+    'COMMUNITY_DEVELOPMENT' => 'Community Development',
+    'SOCIAL_PROTECTION' => 'Social Protection',
+    'PEACE_AND_SECURITY' => 'Peace and Security',
+    'DISASTER_MANAGEMENT' => 'Disaster Management',
+    'RESEARCH' => 'Research',
+    'SCIENCE_AND_TECHNOLOGY' => 'Science and Technology',
+    'CULTURE_AND_ARTS' => 'Culture and Arts',
+    'SPORTS' => 'Sports',
+    'RELIGION' => 'Religion',
+    'ADVOCACY' => 'Advocacy',
+    'OTHER' => 'Other',
 ];
-
-
-/*
-|--------------------------------------------------------------------------
-| Beneficiary labels
-|--------------------------------------------------------------------------
-*/
 
 $beneficiaryLabels = [
-
-    'PUBLIC'
-        => 'Public',
-
-    'CHILDREN'
-        => 'Children',
-
-    'ELDERLY'
-        => 'The Elderly',
-
-    'YOUTH'
-        => 'Youth',
-
-    'COMMERCIAL_SEX_WORKERS'
-        => 'Commercial sex workers',
-
-    'DRUG_ALCOHOL_ADDICTS'
-        => 'Drug and alcohol addicts',
-
-    'HOMELESS_PEOPLE'
-        => 'Homeless people',
-
-    'ORPHANS_VULNERABLE_CHILDREN'
-        => 'Orphans and Vulnerable Children',
-
-    'PERSONS_WITH_DISABILITY'
-        => 'Persons with Disability',
-
-    'REFUGEES'
-        => 'Refugees',
-
-    'STREET_CHILDREN'
-        => 'Street Children',
-
-    'THE_POOR'
-        => 'The Poor',
-
-    'PRISONERS_EX_CONVICTS'
-        => 'Prisoners and ex-convict',
-
-    'PEOPLE_LIVING_WITH_HIV_AIDS'
-        => 'People living with HIV/AIDS',
-
-    'CAREGIVERS_VULNERABLE_GROUPS'
-        => 'Caregivers for vulnerable groups (OVCs, Elderly, PLWAs)',
-
-    'OTHER'
-        => 'Others not listed here',
+    'WOMEN' => 'Women',
+    'MEN' => 'Men',
+    'CHILDREN' => 'Children',
+    'YOUTH' => 'Youth',
+    'ELDERLY' => 'Older Persons',
+    'PERSONS_WITH_DISABILITIES' => 'Persons with Disabilities',
+    'LOW_INCOME_GROUPS' => 'Low-Income Groups',
+    'RURAL_COMMUNITIES' => 'Rural Communities',
+    'URBAN_COMMUNITIES' => 'Urban Communities',
+    'REFUGEES' => 'Refugees',
+    'INTERNALLY_DISPLACED_PERSONS' => 'Internally Displaced Persons',
+    'FARMERS' => 'Farmers',
+    'WORKERS' => 'Workers',
+    'STUDENTS' => 'Students',
+    'OTHER' => 'Other',
+    'PUBLIC' => 'Public',
 ];
 
 
 /*
 |--------------------------------------------------------------------------
-| Application ID
+| Application
 |--------------------------------------------------------------------------
 */
 
-$applicationId =
-    filter_input(
-        INPUT_GET,
-        'id',
-        FILTER_VALIDATE_INT
-    );
+$stmt = $db->prepare(
+    "
+    SELECT
+        id,
+        application_reference,
+        pbo_name,
+        pbo_registration_number,
+        registration_date,
+        registration_type,
+        status,
+        financial_year_start_month,
+        financial_year_end_month,
+        created_by,
+        updated_by,
+        submitted_by,
+        created_at,
+        updated_at,
+        submitted_at
+    FROM pbo_applications
+    WHERE id = :application_id
+      AND status = 'submitted'
+    LIMIT 1
+    "
+);
 
-if (!$applicationId) {
-
-    header(
-        'Location: /pbo-portal/applications/records.php'
-    );
-
-    exit;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Master application
-|--------------------------------------------------------------------------
-*/
-
-$statement =
-    $connection->prepare(
-        "
-        SELECT
-            id,
-            application_reference,
-            pbo_name,
-            pbo_registration_number,
-            registration_type,
-            status,
-            financial_year_start_month,
-            financial_year_end_month,
-            created_by,
-            updated_by,
-            submitted_by,
-            created_at,
-            updated_at,
-            submitted_at
-        FROM pbo_applications
-        WHERE id = :application_id
-          AND status = 'submitted'
-        LIMIT 1
-        "
-    );
-
-
-$statement->execute([
-    ':application_id'
-        => $applicationId,
+$stmt->execute([
+    ':application_id' => $applicationId,
 ]);
 
-
-$application =
-    $statement->fetch(
-        PDO::FETCH_ASSOC
-    );
-
+$application = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$application) {
-
     http_response_code(404);
-
-    exit(
-        'Application record not found.'
-    );
+    exit('Submitted application record not found.');
 }
 
 
 /*
 |--------------------------------------------------------------------------
-| Records page should expose submitted applications
+| Headquarters address
 |--------------------------------------------------------------------------
 */
 
-if (
-    $application['status'] !==
-    'submitted'
-) {
+$stmt = $db->prepare(
+    "
+    SELECT
+        county,
+        town,
+        sub_county,
+        physical_address,
+        postal_address,
+        postal_code,
+        phone_number,
+        alternative_phone_number,
+        email
+    FROM application_addresses
+    WHERE application_id = :application_id
+    LIMIT 1
+    "
+);
 
-    header(
-        'Location: /pbo-portal/applications/review.php?id=' .
-        urlencode(
-            (string) $applicationId
-        )
-    );
-
-    exit;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Address
-|--------------------------------------------------------------------------
-*/
-
-$statement =
-    $connection->prepare(
-        "
-        SELECT
-            county,
-            sub_county,
-            physical_address,
-            postal_address,
-            postal_code,
-            phone_number,
-            alternative_phone_number,
-            email
-        FROM application_addresses
-        WHERE application_id =
-            :application_id
-        LIMIT 1
-        "
-    );
-
-
-$statement->execute([
-    ':application_id'
-        => $applicationId,
+$stmt->execute([
+    ':application_id' => $applicationId,
 ]);
 
-
-$address =
-    $statement->fetch(
-        PDO::FETCH_ASSOC
-    );
-
+$address = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$address) {
-
     $address = [
-
         'county' => '',
-
+        'town' => '',
         'sub_county' => '',
-
         'physical_address' => '',
-
         'postal_address' => '',
-
         'postal_code' => '',
-
         'phone_number' => '',
-
         'alternative_phone_number' => '',
-
         'email' => '',
     ];
 }
@@ -513,80 +299,73 @@ if (!$address) {
 
 /*
 |--------------------------------------------------------------------------
-| International
+| Other areas of operation
+|--------------------------------------------------------------------------
+*/
+
+$stmt = $db->prepare(
+    "
+    SELECT
+        id,
+        county,
+        sub_county,
+        physical_address,
+        phone_number,
+        alternative_phone_number,
+        email,
+        postal_address,
+        postal_code
+    FROM application_operating_locations
+    WHERE application_id = :application_id
+    ORDER BY id ASC
+    "
+);
+
+$stmt->execute([
+    ':application_id' => $applicationId,
+]);
+
+$operatingLocations = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+
+/*
+|--------------------------------------------------------------------------
+| International details
 |--------------------------------------------------------------------------
 */
 
 $internationalDetails = null;
 
-
 if (
-    $application['registration_type'] ===
+    (string) $application['registration_type'] ===
     'international'
 ) {
+    $stmt = $db->prepare(
+        "
+        SELECT
+            parent_organization_name,
+            country_of_origin,
+            registration_number,
+            parent_physical_address,
+            parent_postal_address,
+            parent_postal_code,
+            parent_phone_number,
+            parent_email,
+            contact_person_name,
+            contact_person_phone,
+            contact_person_email
+        FROM application_international_details
+        WHERE application_id = :application_id
+        LIMIT 1
+        "
+    );
 
-    $statement =
-        $connection->prepare(
-            "
-            SELECT
-                parent_organization_name,
-                country_of_origin,
-                registration_number,
-                parent_physical_address,
-                parent_postal_address,
-                parent_postal_code,
-                parent_phone_number,
-                parent_email,
-                contact_person_name,
-                contact_person_phone,
-                contact_person_email
-            FROM application_international_details
-            WHERE application_id =
-                :application_id
-            LIMIT 1
-            "
-        );
-
-
-    $statement->execute([
-        ':application_id'
-            => $applicationId,
+    $stmt->execute([
+        ':application_id' => $applicationId,
     ]);
 
-
     $internationalDetails =
-        $statement->fetch(
-            PDO::FETCH_ASSOC
-        );
-
-
-    if (!$internationalDetails) {
-
-        $internationalDetails = [
-
-            'parent_organization_name' => '',
-
-            'country_of_origin' => '',
-
-            'registration_number' => '',
-
-            'parent_physical_address' => '',
-
-            'parent_postal_address' => '',
-
-            'parent_postal_code' => '',
-
-            'parent_phone_number' => '',
-
-            'parent_email' => '',
-
-            'contact_person_name' => '',
-
-            'contact_person_phone' => '',
-
-            'contact_person_email' => '',
-        ];
-    }
+        $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
 }
 
 
@@ -596,30 +375,22 @@ if (
 |--------------------------------------------------------------------------
 */
 
-$statement =
-    $connection->prepare(
-        "
-        SELECT
-            objective_code,
-            description
-        FROM application_objectives
-        WHERE application_id =
-            :application_id
-        ORDER BY id ASC
-        "
-    );
+$stmt = $db->prepare(
+    "
+    SELECT
+        objective_code,
+        description
+    FROM application_objectives
+    WHERE application_id = :application_id
+    ORDER BY id ASC
+    "
+);
 
-
-$statement->execute([
-    ':application_id'
-        => $applicationId,
+$stmt->execute([
+    ':application_id' => $applicationId,
 ]);
 
-
-$objectives =
-    $statement->fetchAll(
-        PDO::FETCH_ASSOC
-    );
+$objectives = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 
 /*
@@ -628,30 +399,22 @@ $objectives =
 |--------------------------------------------------------------------------
 */
 
-$statement =
-    $connection->prepare(
-        "
-        SELECT
-            beneficiary_code,
-            description
-        FROM application_beneficiaries
-        WHERE application_id =
-            :application_id
-        ORDER BY id ASC
-        "
-    );
+$stmt = $db->prepare(
+    "
+    SELECT
+        beneficiary_code,
+        description
+    FROM application_beneficiaries
+    WHERE application_id = :application_id
+    ORDER BY id ASC
+    "
+);
 
-
-$statement->execute([
-    ':application_id'
-        => $applicationId,
+$stmt->execute([
+    ':application_id' => $applicationId,
 ]);
 
-
-$beneficiaries =
-    $statement->fetchAll(
-        PDO::FETCH_ASSOC
-    );
+$beneficiaries = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 
 /*
@@ -660,45 +423,76 @@ $beneficiaries =
 |--------------------------------------------------------------------------
 */
 
-$statement =
-    $connection->prepare(
-        "
-        SELECT
-            id,
-            full_name,
-            designation,
-            nationality,
-            id_passport_number,
-            kra_pin,
-            phone_number,
-            email,
-            signature
-        FROM application_officials
-        WHERE application_id =
-            :application_id
-        ORDER BY
-            CASE designation
-                WHEN 'CHAIRPERSON' THEN 1
-                WHEN 'TREASURER' THEN 2
-                WHEN 'SECRETARY' THEN 3
-                WHEN 'DIRECTOR' THEN 4
-                ELSE 5
-            END,
-            id ASC
-        "
-    );
+$stmt = $db->prepare(
+    "
+    SELECT
+        id,
+        full_name,
+        designation,
+        nationality,
+        id_passport_number,
+        kra_pin,
+        phone_number,
+        email,
+        signature
+    FROM application_officials
+    WHERE application_id = :application_id
+    ORDER BY
+        CASE designation
+            WHEN 'CHAIRPERSON' THEN 1
+            WHEN 'TREASURER' THEN 2
+            WHEN 'SECRETARY' THEN 3
+            WHEN 'DIRECTOR' THEN 4
+            ELSE 5
+        END,
+        id ASC
+    "
+);
 
-
-$statement->execute([
-    ':application_id'
-        => $applicationId,
+$stmt->execute([
+    ':application_id' => $applicationId,
 ]);
 
+$officials = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-$officials =
-    $statement->fetchAll(
-        PDO::FETCH_ASSOC
+
+/*
+|--------------------------------------------------------------------------
+| Split officials
+|--------------------------------------------------------------------------
+*/
+
+$principalOfficials = [
+    'CHAIRPERSON' => null,
+    'TREASURER'   => null,
+    'SECRETARY'   => null,
+];
+
+$directors = [];
+
+foreach ($officials as $official) {
+    $designation = strtoupper(
+        trim(
+            (string) (
+                $official['designation'] ?? ''
+            )
+        )
     );
+
+    if (
+        array_key_exists(
+            $designation,
+            $principalOfficials
+        )
+    ) {
+        $principalOfficials[$designation] =
+            $official;
+    } elseif (
+        $designation === 'DIRECTOR'
+    ) {
+        $directors[] = $official;
+    }
+}
 
 
 /*
@@ -707,55 +501,50 @@ $officials =
 |--------------------------------------------------------------------------
 */
 
-$startMonth =
-    (int)
-    ($application[
+$financialYearLabel = '';
+
+$startMonth = (int) (
+    $application[
         'financial_year_start_month'
-    ] ?? 0);
+    ] ?? 0
+);
 
-
-$endMonth =
-    (int)
-    ($application[
+$endMonth = (int) (
+    $application[
         'financial_year_end_month'
-    ] ?? 0);
-
-
-/*
-|--------------------------------------------------------------------------
-| Submitted date
-|--------------------------------------------------------------------------
-*/
-
-$submittedDate = '';
+    ] ?? 0
+);
 
 if (
-    !empty(
-        $application['submitted_at']
-    )
+    isset($months[$startMonth]) &&
+    isset($months[$endMonth])
 ) {
-
-    $timestamp =
-        strtotime(
-            (string)
-            $application['submitted_at']
-        );
-
-
-    if ($timestamp !== false) {
-
-        $submittedDate =
-            date(
-                'd F Y, H:i',
-                $timestamp
-            );
-    }
+    $financialYearLabel =
+        $months[$startMonth]
+        . ' to '
+        . $months[$endMonth];
 }
 
 
 /*
 |--------------------------------------------------------------------------
-| Header
+| Dates
+|--------------------------------------------------------------------------
+*/
+
+$registrationDate = formatDateValue(
+    $application['registration_date'] ?? null
+);
+
+$submittedDate = formatDateValue(
+    $application['submitted_at'] ?? null,
+    'd F Y, H:i'
+);
+
+
+/*
+|--------------------------------------------------------------------------
+| Shared header
 |--------------------------------------------------------------------------
 */
 
@@ -763,751 +552,1563 @@ require_once __DIR__ . '/../includes/header.php';
 
 ?>
 
-
 <style>
 
-/* ==============================================================
-   APPLICATION REPORT
-   ============================================================== */
+/*
+|--------------------------------------------------------------------------
+| PBO RECORD
+|--------------------------------------------------------------------------
+*/
 
-.application-report {
+.pbo-record {
+    --record-navy: #123f67;
+    --record-navy-dark: #082d4b;
+    --record-blue: #176fa8;
+    --record-blue-soft: #edf6fc;
+
+    --record-gold: #d69a18;
+    --record-gold-dark: #8d6000;
+    --record-gold-soft: #fff7df;
+
+    --record-green: #197149;
+    --record-green-dark: #0d5133;
+    --record-green-soft: #eaf7ef;
+
+    --record-ink: #172b3a;
+    --record-text: #344b5c;
+    --record-muted: #71818e;
+
+    --record-border: #d7e1e8;
+    --record-soft: #f6f9fb;
+
     max-width: 1200px;
     margin: 0 auto;
 }
 
 
-.report-cover {
-    margin-bottom: 22px;
-    overflow: hidden;
+/*
+|--------------------------------------------------------------------------
+| Toolbar
+|--------------------------------------------------------------------------
+*/
 
-    background: #ffffff;
-
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-
-    box-shadow: var(--shadow);
-}
-
-
-.report-cover-top {
-    padding: 26px 28px;
-
-    background:
-        linear-gradient(
-            110deg,
-            var(--blue-dark),
-            var(--blue)
-        );
-
-    color: #ffffff;
-}
-
-
-.report-cover-top h1 {
-    margin: 5px 0;
-
-    color: #ffffff;
-}
-
-
-.report-cover-top p {
-    margin: 0;
-
-    color: rgba(255, 255, 255, .8);
-}
-
-
-.report-reference {
-    display: inline-block;
-
-    margin-top: 14px;
-    padding: 7px 12px;
-
-    background: rgba(255, 255, 255, .12);
-
-    border: 1px solid rgba(255, 255, 255, .25);
-    border-radius: 6px;
-
-    color: #ffffff;
-
-    font-size: 13px;
-    font-weight: 800;
-
-    letter-spacing: .4px;
-}
-
-
-.report-cover-bottom {
-    display: grid;
-    grid-template-columns:
-        repeat(
-            auto-fit,
-            minmax(190px, 1fr)
-        );
-
-    gap: 0;
-
-    border-top: 1px solid var(--border);
-}
-
-
-.report-meta {
-    padding: 15px 18px;
-
-    border-right: 1px solid var(--border);
-}
-
-
-.report-meta:last-child {
-    border-right: 0;
-}
-
-
-.report-meta span {
-    display: block;
-
-    margin-bottom: 4px;
-
-    color: var(--text-muted);
-
-    font-size: 9px;
-    font-weight: 800;
-
-    letter-spacing: .6px;
-    text-transform: uppercase;
-}
-
-
-.report-meta strong {
-    color: var(--heading);
-}
-
-
-.report-toolbar {
+.record-toolbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-
     gap: 12px;
-
     margin-bottom: 18px;
 }
 
-
-.report-toolbar-actions {
+.record-toolbar-actions {
     display: flex;
     gap: 8px;
+    flex-wrap: wrap;
+}
+
+.record-toolbar .btn {
+    white-space: nowrap;
 }
 
 
-.report-section {
-    margin-bottom: 18px;
+/*
+|--------------------------------------------------------------------------
+| Cover
+|--------------------------------------------------------------------------
+*/
+
+.record-cover {
     overflow: hidden;
-
-    background: #ffffff;
-
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-
-    box-shadow: var(--shadow-sm);
+    margin-bottom: 22px;
+    border: 1px solid #cbdbe6;
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 5px 18px rgba(18,63,103,.08);
 }
 
-
-.report-section-header {
-    display: flex;
-    align-items: center;
-
-    gap: 12px;
-
-    padding: 15px 18px;
-
+.record-cover-main {
+    position: relative;
+    overflow: hidden;
+    padding: 34px 38px;
+    color: #fff;
     background:
         linear-gradient(
-            100deg,
-            var(--blue-light),
-            #ffffff
+            135deg,
+            #082d4b 0%,
+            #123f67 48%,
+            #176fa8 100%
         );
+}
 
-    border-bottom: 1px solid var(--border);
+.record-cover-main::after {
+    content: '';
+    position: absolute;
+    width: 250px;
+    height: 250px;
+    right: -80px;
+    top: -130px;
+    border: 1px solid rgba(255,255,255,.15);
+    border-radius: 50%;
+    box-shadow:
+        0 0 0 35px rgba(255,255,255,.025),
+        0 0 0 70px rgba(255,255,255,.018);
+}
+
+.record-authority {
+    display: block;
+    margin-bottom: 8px;
+    color: #e8c76e;
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 1.15px;
+    text-transform: uppercase;
+}
+
+.record-cover-main h1 {
+    position: relative;
+    z-index: 1;
+    margin: 0 0 7px;
+    font-size: 29px;
+    font-weight: 900;
+    line-height: 1.15;
+}
+
+.record-cover-main p {
+    position: relative;
+    z-index: 1;
+    margin: 0;
+    color: rgba(255,255,255,.82);
+    font-size: 12px;
+}
+
+.record-reference {
+    position: relative;
+    z-index: 1;
+    display: inline-block;
+    margin-top: 18px;
+    padding: 7px 12px;
+    border: 1px solid rgba(255,255,255,.22);
+    border-radius: 5px;
+    background: rgba(255,255,255,.09);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .3px;
 }
 
 
-.report-section-number {
+/*
+|--------------------------------------------------------------------------
+| Identity
+|--------------------------------------------------------------------------
+*/
+
+.record-identity {
+    display: grid;
+    grid-template-columns: 1.45fr 1fr 1fr;
+    border-top: 4px solid var(--record-gold);
+}
+
+.record-identity-item {
+    position: relative;
+    min-width: 0;
+    padding: 19px 23px;
+    border-right: 1px solid #c7d7e2;
+    background: #fff;
+}
+
+.record-identity-item:last-child {
+    border-right: 0;
+}
+
+.record-identity-item span {
+    display: block;
+    min-height: 17px;
+    margin-bottom: 6px;
+    color: var(--record-muted);
+    font-size: 8px;
+    font-weight: 900;
+    letter-spacing: .65px;
+    text-transform: uppercase;
+}
+
+.record-identity-item strong {
+    display: block;
+    overflow-wrap: anywhere;
+    color: var(--record-ink);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.record-identity-item:nth-child(1)::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--record-blue);
+}
+
+.record-identity-item:nth-child(2) strong {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 5px;
+    color: var(--record-navy-dark);
+    background: var(--record-blue-soft);
+    box-shadow: inset 0 0 0 1px #d5e9f4;
+}
+
+.record-identity-item:nth-child(3)::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: 20px;
+    bottom: 20px;
+    width: 1px;
+    background: #e4ebef;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Sections
+|--------------------------------------------------------------------------
+*/
+
+.record-section {
+    overflow: hidden;
+    margin-bottom: 22px;
+    border: 1px solid var(--record-border);
+    border-radius: 13px;
+    background: #fff;
+    box-shadow: 0 4px 15px rgba(18,63,103,.055);
+}
+
+.record-section-header {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    padding: 17px 21px;
+    border-bottom: 3px solid var(--record-blue);
+    background: linear-gradient(
+        90deg,
+        #f0f7fb,
+        #ffffff
+    );
+}
+
+.record-section-header::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -3px;
+    width: 27%;
+    height: 3px;
+    background: var(--record-gold);
+}
+
+.record-section-number {
+    flex: 0 0 34px;
+    width: 34px;
+    height: 34px;
     display: flex;
     align-items: center;
     justify-content: center;
-
-    flex: 0 0 auto;
-
-    width: 32px;
-    height: 32px;
-
+    border: 2px solid #d5e7f1;
     border-radius: 50%;
+    background: #fff;
+    color: var(--record-navy);
+    box-shadow: 0 2px 7px rgba(18,63,103,.08);
+    font-size: 12px;
+    font-weight: 900;
+}
 
-    background: var(--blue);
+.record-section-header h2 {
+    margin: 0 0 3px;
+    color: var(--record-navy-dark);
+    font-size: 16px;
+    font-weight: 900;
+}
 
-    color: #ffffff;
+.record-section-header p {
+    margin: 0;
+    color: var(--record-muted);
+    font-size: 10px;
+}
 
+.record-section-body {
+    padding: 22px;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Detail cards
+|--------------------------------------------------------------------------
+*/
+
+.detail-card {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid #d5e0e7;
+    border-radius: 12px;
+    background: linear-gradient(
+        180deg,
+        #ffffff,
+        #fbfcfd
+    );
+    box-shadow: 0 3px 12px rgba(18,63,103,.055);
+}
+
+.detail-card + .detail-card {
+    margin-top: 18px;
+}
+
+.detail-card-header {
+    position: relative;
+    padding: 12px 17px 12px 20px;
+    border-bottom: 1px solid #cadfea;
+    background: linear-gradient(
+        90deg,
+        #eaf5fb,
+        #f7fbfd
+    );
+    color: var(--record-navy-dark);
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: .7px;
+    text-transform: uppercase;
+}
+
+.detail-card-header::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 5px;
+    background: var(--record-blue);
+}
+
+.detail-card-header.gold {
+    border-bottom-color: #ead79a;
+    background: linear-gradient(
+        90deg,
+        var(--record-gold-soft),
+        #fffdf7
+    );
+    color: var(--record-gold-dark);
+}
+
+.detail-card-header.gold::before {
+    background: var(--record-gold);
+}
+
+.detail-card-body {
+    padding: 21px 20px;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Fields
+|--------------------------------------------------------------------------
+*/
+
+.detail-grid {
+    display: grid;
+    grid-template-columns: repeat(
+        3,
+        minmax(0, 1fr)
+    );
+    gap: 21px 26px;
+}
+
+.detail-field {
+    min-width: 0;
+}
+
+.detail-field.span-2 {
+    grid-column: span 2;
+}
+
+.detail-field.span-3 {
+    grid-column: 1 / -1;
+}
+
+.detail-field span {
+    display: block;
+    margin-bottom: 5px;
+    color: var(--record-muted);
+    font-size: 8px;
+    font-weight: 900;
+    letter-spacing: .55px;
+    text-transform: uppercase;
+}
+
+.detail-field strong {
+    display: block;
+    overflow-wrap: anywhere;
+    color: var(--record-ink);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.detail-field.important strong {
+    color: var(--record-navy-dark);
+    font-size: 13px;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Operating locations
+|--------------------------------------------------------------------------
+*/
+
+.operation-status {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 17px;
+    padding: 12px 15px;
+    border: 1px solid #d7e1e8;
+    border-radius: 9px;
     font-size: 11px;
     font-weight: 800;
 }
 
-
-.report-section-header h2 {
-    margin: 0;
-
-    color: var(--blue-dark);
-
-    font-size: 17px;
+.operation-status.yes {
+    border-color: #c6e4d3;
+    background: var(--record-green-soft);
+    color: var(--record-green-dark);
 }
 
-
-.report-section-body {
-    padding: 20px;
+.operation-status.no {
+    border-color: #d9e1e7;
+    background: #f7f9fa;
+    color: var(--record-muted);
 }
 
-
-.report-grid {
-    display: grid;
-
-    grid-template-columns:
-        repeat(
-            auto-fit,
-            minmax(220px, 1fr)
-        );
-
-    gap: 14px;
-}
-
-
-.report-field {
-    min-width: 0;
-
-    padding: 12px 14px;
-
-    background: var(--soft-bg);
-
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-}
-
-
-.report-field span {
-    display: block;
-
-    margin-bottom: 4px;
-
-    color: var(--text-muted);
-
-    font-size: 9px;
-    font-weight: 800;
-
-    letter-spacing: .4px;
-    text-transform: uppercase;
-}
-
-
-.report-field strong {
-    display: block;
-
-    overflow-wrap: anywhere;
-
-    color: var(--heading);
-
-    font-size: 12px;
-}
-
-
-.report-check-grid {
-    display: grid;
-
-    grid-template-columns:
-        repeat(
-            auto-fit,
-            minmax(230px, 1fr)
-        );
-
-    gap: 9px;
-}
-
-
-.report-check {
+.operation-status-mark {
+    width: 24px;
+    height: 24px;
+    flex: 0 0 24px;
     display: flex;
-    align-items: flex-start;
-
-    gap: 8px;
-
-    padding: 10px 12px;
-
-    background: var(--soft-bg);
-
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: #fff;
     font-size: 12px;
-}
-
-
-.report-check-mark {
-    color: var(--green);
-
     font-weight: 900;
 }
 
+.operation-status.yes .operation-status-mark {
+    color: var(--record-green);
+    box-shadow: inset 0 0 0 1px #b9dac8;
+}
 
-.official-report-card {
-    margin-bottom: 17px;
+.operation-status.no .operation-status-mark {
+    color: var(--record-muted);
+    box-shadow: inset 0 0 0 1px #d6dfe5;
+}
+
+.operation-location {
     overflow: hidden;
-
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
+    margin-top: 15px;
+    border: 1px solid #d5e0e7;
+    border-radius: 10px;
+    background: #fff;
 }
 
-
-.official-report-card:last-child {
-    margin-bottom: 0;
+.operation-location:first-of-type {
+    margin-top: 0;
 }
 
-
-.official-report-header {
-    padding: 12px 15px;
-
-    background: var(--soft-bg);
-
-    border-bottom: 1px solid var(--border);
-}
-
-
-.official-report-header span {
-    display: block;
-
-    color: var(--text-muted);
-
+.operation-location-header {
+    padding: 10px 15px;
+    border-bottom: 1px solid #d7e7ef;
+    background: linear-gradient(
+        90deg,
+        #f1f8fc,
+        #fbfdfe
+    );
+    color: var(--record-navy-dark);
     font-size: 9px;
-    font-weight: 800;
-
+    font-weight: 900;
     letter-spacing: .6px;
     text-transform: uppercase;
 }
 
-
-.official-report-header h3 {
-    margin: 2px 0 0;
-
-    color: var(--blue-dark);
-
-    font-size: 16px;
-}
-
-
-.official-report-body {
+.operation-location-body {
     padding: 18px;
 }
 
 
-/* ==============================================================
-   SIGNATURE DISPLAY
-   ============================================================== */
+/*
+|--------------------------------------------------------------------------
+| Selection panels
+|--------------------------------------------------------------------------
+*/
 
-.signature-panel {
-    margin-top: 16px;
-    padding: 14px;
-
-    background:
-        linear-gradient(
-            135deg,
-            #fafbfc,
-            #ffffff
-        );
-
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
+.selection-panel {
+    padding: 9px;
+    border: 1px solid #d8e3e9;
+    border-radius: 10px;
+    background: #f8fbfc;
 }
 
+.selection-grid {
+    display: grid;
+    grid-template-columns: repeat(
+        3,
+        minmax(0, 1fr)
+    );
+    gap: 8px;
+}
 
-.signature-panel-label {
+.selection-item {
+    min-width: 0;
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 11px;
+    border: 1px solid #dce7ec;
+    border-radius: 7px;
+    background: #fff;
+}
+
+.selection-mark {
+    flex: 0 0 20px;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--record-green);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 900;
+}
+
+.selection-item span:last-child {
+    min-width: 0;
+    color: var(--record-text);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.35;
+}
+
+.description-box {
+    margin-top: 15px;
+    padding: 13px 16px;
+    border-left: 4px solid var(--record-gold);
+    border-radius: 7px;
+    background: var(--record-gold-soft);
+}
+
+.description-box span {
     display: block;
-
-    margin-bottom: 10px;
-
-    color: var(--text-muted);
-
-    font-size: 9px;
-    font-weight: 800;
-
+    margin-bottom: 6px;
+    color: var(--record-gold-dark);
+    font-size: 8px;
+    font-weight: 900;
     letter-spacing: .6px;
     text-transform: uppercase;
 }
 
+.description-box p {
+    margin: 0;
+    color: var(--record-text);
+    font-size: 10px;
+    line-height: 1.5;
+}
 
-.signature-preview {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    min-height: 110px;
-    padding: 12px;
-
-    background: #ffffff;
-
-    border: 1px dashed #cbd5df;
-    border-radius: 6px;
+.description-box p + p {
+    margin-top: 8px;
 }
 
 
-.signature-preview img {
+/*
+|--------------------------------------------------------------------------
+| Financial year
+|--------------------------------------------------------------------------
+*/
+
+.financial-year-card {
+    padding: 22px;
+    border: 1px solid #d5e0e7;
+    border-radius: 11px;
+    background:
+        linear-gradient(
+            135deg,
+            #f8fbfd,
+            #ffffff
+        );
+    box-shadow: 0 3px 12px rgba(18,63,103,.05);
+}
+
+.financial-year-card span {
     display: block;
-
-    max-width: 280px;
-    max-height: 110px;
-
-    width: auto;
-    height: auto;
-
-    object-fit: contain;
+    margin-bottom: 6px;
+    color: var(--record-muted);
+    font-size: 8px;
+    font-weight: 900;
+    letter-spacing: .6px;
+    text-transform: uppercase;
 }
 
-
-.signature-pdf {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-
-    gap: 15px;
-
-    width: 100%;
-}
-
-
-.signature-pdf-details strong {
+.financial-year-card strong {
     display: block;
-
-    margin-bottom: 3px;
-
-    color: var(--heading);
+    color: var(--record-navy-dark);
+    font-size: 21px;
+    line-height: 1.2;
 }
 
-
-.signature-pdf-details span {
-    color: var(--text-muted);
-
-    font-size: 11px;
-}
-
-
-.signature-missing {
-    color: var(--red);
-
-    font-size: 11px;
-    font-weight: 700;
-}
-
-
-/* ==============================================================
-   OTHER DESCRIPTION
-   ============================================================== */
-
-.report-description {
-    margin-top: 15px;
-    padding: 15px 17px;
-
-    background: #fffdf7;
-
-    border: 1px solid #eadfbf;
-    border-left: 4px solid var(--gold);
-    border-radius: var(--radius);
-}
-
-
-.report-description span {
-    display: block;
-
-    margin-bottom: 4px;
-
-    color: var(--text-muted);
-
-    font-size: 9px;
-    font-weight: 800;
-
+.financial-year-badge {
+    display: inline-block;
+    margin-top: 10px;
+    padding: 5px 10px;
+    border-radius: 4px;
+    background: var(--record-green);
+    color: #fff;
+    font-size: 8px;
+    font-weight: 900;
     letter-spacing: .5px;
     text-transform: uppercase;
 }
 
 
-.report-description strong {
-    color: var(--heading);
-}
+/*
+|--------------------------------------------------------------------------
+| Officials
+|--------------------------------------------------------------------------
+*/
 
-
-.report-description p {
-    margin: 6px 0 0;
-
-    color: var(--text-secondary);
-
-    white-space: pre-wrap;
-}
-
-
-/* ==============================================================
-   FINANCIAL YEAR
-   ============================================================== */
-
-.financial-year-report {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    gap: 22px;
-
-    padding: 26px;
-
-    text-align: center;
-
-    background:
-        linear-gradient(
-            110deg,
-            var(--blue-light),
-            #ffffff
-        );
-
-    border: 1px solid #d2e0ec;
-    border-radius: var(--radius);
-}
-
-
-.financial-year-month span {
-    display: block;
-
-    margin-bottom: 4px;
-
-    color: var(--text-muted);
-
-    font-size: 9px;
-    font-weight: 800;
-
-    text-transform: uppercase;
-}
-
-
-.financial-year-month strong {
-    color: var(--blue-dark);
-
-    font-size: 20px;
-}
-
-
-.financial-year-arrow {
-    color: var(--gold);
-
-    font-size: 26px;
-    font-weight: 800;
-}
-
-
-/* ==============================================================
-   REPORT FOOTER
-   ============================================================== */
-
-.report-document-footer {
-    margin-top: 22px;
-    padding: 18px 20px;
-
-    background: #ffffff;
-
-    border-top: 3px solid var(--blue);
-    border-radius: var(--radius);
-
-    box-shadow: var(--shadow-sm);
-}
-
-
-.report-document-footer-grid {
+.official-grid {
     display: grid;
-
-    grid-template-columns:
-        repeat(
-            auto-fit,
-            minmax(180px, 1fr)
-        );
-
+    grid-template-columns: repeat(
+        3,
+        minmax(0, 1fr)
+    );
     gap: 15px;
 }
 
+.official-card {
+    overflow: hidden;
+    min-width: 0;
+    border: 1px solid #d5e0e7;
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 3px 12px rgba(18,63,103,.045);
+}
 
-.report-document-footer span {
+.official-card-header {
+    padding: 13px 15px;
+    border-left: 4px solid var(--record-blue);
+    border-bottom: 1px solid #d9e5eb;
+    background: linear-gradient(
+        90deg,
+        #eef7fb,
+        #ffffff
+    );
+}
+
+.official-card-header.director {
+    border-left-color: var(--record-gold);
+    background: linear-gradient(
+        90deg,
+        #fff9e8,
+        #ffffff
+    );
+}
+
+.official-card-header span {
     display: block;
-
     margin-bottom: 3px;
-
-    color: var(--text-muted);
-
-    font-size: 9px;
-    font-weight: 800;
-
+    color: var(--record-muted);
+    font-size: 7px;
+    font-weight: 900;
+    letter-spacing: .55px;
     text-transform: uppercase;
 }
 
+.official-card-header h3 {
+    margin: 0;
+    color: var(--record-navy-dark);
+    font-size: 13px;
+    font-weight: 900;
+}
 
-.report-document-footer strong {
-    color: var(--heading);
+.official-card-body {
+    padding: 17px;
+}
 
-    font-size: 11px;
+.official-card .detail-grid {
+    grid-template-columns: repeat(
+        2,
+        minmax(0, 1fr)
+    );
+    gap: 14px 18px;
 }
 
 
-/* ==============================================================
-   STATUS BADGE
-   ============================================================== */
+/*
+|--------------------------------------------------------------------------
+| Directors
+|--------------------------------------------------------------------------
+*/
 
-.report-status {
-    display: inline-flex;
+.directors-section {
+    margin-top: 22px;
+    padding-top: 18px;
+    border-top: 1px solid #dce6eb;
+}
+
+.directors-heading {
+    display: flex;
     align-items: center;
+    gap: 9px;
+    margin-bottom: 13px;
+}
 
-    gap: 6px;
+.directors-heading h3 {
+    margin: 0;
+    color: var(--record-navy-dark);
+    font-size: 13px;
+    font-weight: 900;
+}
 
-    padding: 5px 9px;
-
-    border-radius: 20px;
-
-    background: var(--green-light);
-
-    color: var(--green-dark);
-
-    font-size: 10px;
-    font-weight: 800;
-
+.optional-badge {
+    display: inline-block;
+    padding: 4px 8px;
+    border: 1px solid #ead79a;
+    border-radius: 4px;
+    background: var(--record-gold-soft);
+    color: var(--record-gold-dark);
+    font-size: 7px;
+    font-weight: 900;
+    letter-spacing: .45px;
     text-transform: uppercase;
 }
 
 
-/* ==============================================================
-   MOBILE
-   ============================================================== */
+/*
+|--------------------------------------------------------------------------
+| Signatures
+|--------------------------------------------------------------------------
+*/
 
-@media (max-width: 700px) {
+.signature-panel {
+    margin-top: 15px;
+    padding: 9px;
+    border: 1px solid #d8e2e8;
+    border-radius: 7px;
+    background: #f8fafb;
+}
 
-    .report-toolbar {
+.signature-panel-label {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--record-muted);
+    font-size: 7px;
+    font-weight: 900;
+    letter-spacing: .55px;
+    text-transform: uppercase;
+}
+
+.signature-preview {
+    min-height: 65px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 7px;
+    border: 1px dashed #c8d5dd;
+    border-radius: 5px;
+    background: #fff;
+}
+
+.signature-preview img {
+    display: block;
+    max-width: 170px;
+    max-height: 60px;
+    object-fit: contain;
+}
+
+.signature-document {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.signature-document strong {
+    display: block;
+    color: var(--record-ink);
+    font-size: 9px;
+}
+
+.signature-document span {
+    display: block;
+    margin-top: 2px;
+    color: var(--record-muted);
+    font-size: 7px;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Record footer
+|--------------------------------------------------------------------------
+*/
+
+.record-footer {
+    overflow: hidden;
+    margin-top: 24px;
+    border: 1px solid #d5e0e7;
+    border-radius: 11px;
+    background: #fff;
+    box-shadow: 0 3px 12px rgba(18,63,103,.045);
+}
+
+.record-footer-accent {
+    height: 4px;
+    background:
+        linear-gradient(
+            90deg,
+            var(--record-navy) 0 45%,
+            var(--record-blue) 45% 75%,
+            var(--record-gold) 75% 100%
+        );
+}
+
+.record-footer-body {
+    padding: 17px 20px;
+}
+
+.record-footer-grid {
+    display: grid;
+    grid-template-columns: repeat(
+        4,
+        minmax(0, 1fr)
+    );
+    gap: 20px;
+}
+
+.record-footer-item {
+    min-width: 0;
+}
+
+.record-footer-item span {
+    display: block;
+    margin-bottom: 5px;
+    color: var(--record-muted);
+    font-size: 7px;
+    font-weight: 900;
+    letter-spacing: .55px;
+    text-transform: uppercase;
+}
+
+.record-footer-item strong {
+    display: block;
+    overflow-wrap: anywhere;
+    color: var(--record-ink);
+    font-size: 10px;
+}
+
+.record-footer-item strong.submitted {
+    color: var(--record-green);
+}
+
+.record-footer-note {
+    margin-top: 15px;
+    padding-top: 11px;
+    border-top: 1px solid #e0e7eb;
+    color: var(--record-muted);
+    font-size: 8px;
+    line-height: 1.45;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Responsive
+|--------------------------------------------------------------------------
+*/
+
+@media (max-width: 900px) {
+    .official-grid {
+        grid-template-columns: repeat(
+            2,
+            minmax(0, 1fr)
+        );
+    }
+
+    .detail-grid {
+        grid-template-columns: repeat(
+            2,
+            minmax(0, 1fr)
+        );
+    }
+
+    .selection-grid {
+        grid-template-columns: repeat(
+            2,
+            minmax(0, 1fr)
+        );
+    }
+
+    .record-footer-grid {
+        grid-template-columns: repeat(
+            2,
+            minmax(0, 1fr)
+        );
+    }
+}
+
+
+@media (max-width: 760px) {
+
+    .record-identity {
+        grid-template-columns: 1fr;
+    }
+
+    .record-identity-item {
+        padding: 18px 20px;
+        border-right: 0;
+        border-bottom: 1px solid #c7d7e2;
+    }
+
+    .record-identity-item:last-child {
+        border-bottom: 0;
+    }
+
+    .record-identity-item:nth-child(3)::after {
+        display: none;
+    }
+
+    .detail-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .detail-field.span-2,
+    .detail-field.span-3 {
+        grid-column: auto;
+    }
+
+    .official-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .official-card .detail-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .selection-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .record-footer-grid {
+        grid-template-columns: repeat(
+            2,
+            minmax(0, 1fr)
+        );
+    }
+
+    .record-toolbar {
         align-items: stretch;
         flex-direction: column;
     }
 
-
-    .report-toolbar-actions {
+    .record-toolbar-actions {
         width: 100%;
     }
 
-
-    .report-toolbar-actions .btn {
+    .record-toolbar-actions .btn {
         flex: 1;
     }
 
-
-    .report-cover-top {
-        padding: 21px;
+    .record-cover-main {
+        padding: 25px 21px;
     }
 
-
-    .report-cover-bottom {
-        grid-template-columns: 1fr;
+    .record-section-body {
+        padding: 15px;
     }
 
-
-    .report-meta {
-        border-right: 0;
-        border-bottom: 1px solid var(--border);
-    }
-
-
-    .report-meta:last-child {
-        border-bottom: 0;
-    }
-
-
-    .financial-year-report {
-        flex-direction: column;
-
-        gap: 10px;
-    }
-
-
-    .financial-year-arrow {
-        transform: rotate(90deg);
+    .detail-card-body {
+        padding: 16px;
     }
 }
 
 
-/* ==============================================================
-   PRINT
-   ============================================================== */
+/*
+|--------------------------------------------------------------------------
+| Print / PDF
+|--------------------------------------------------------------------------
+*/
 
 @media print {
 
     @page {
-        size: A4;
-        margin: 12mm;
+        size: A4 portrait;
+        margin: 7mm 8mm;
     }
 
-
+    html,
     body {
-        background: #ffffff !important;
+        width: 100%;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #fff !important;
+        font-size: 8.5pt !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
     }
-
 
     header,
     footer,
     nav,
     .sidebar,
     .topbar,
-    .report-toolbar,
+    .record-toolbar,
     .no-print {
         display: none !important;
     }
 
-
     .applications-page,
-    .application-report {
+    .pbo-record {
         width: 100% !important;
         max-width: none !important;
-
         margin: 0 !important;
         padding: 0 !important;
     }
 
-
-    .report-cover,
-    .report-section,
-    .official-report-card,
-    .report-document-footer {
+    .record-cover {
+        margin: 0 0 4mm !important;
+        border-radius: 4px !important;
         box-shadow: none !important;
-
         break-inside: avoid;
     }
 
-
-    .report-section {
-        margin-bottom: 10px;
+    .record-cover-main {
+        padding: 5mm 6mm !important;
     }
 
-
-    .official-report-card {
-        break-inside: avoid;
-    }
-
-
-    .signature-preview {
-        min-height: 80px;
-    }
-
-
-    .signature-preview img {
-        max-height: 80px;
-    }
-
-
-    .btn {
+    .record-cover-main::after {
         display: none !important;
     }
 
+    .record-authority {
+        margin-bottom: 1mm !important;
+        font-size: 6.5pt !important;
+    }
+
+    .record-cover-main h1 {
+        margin: 0 0 1mm !important;
+        font-size: 16pt !important;
+        line-height: 1.1 !important;
+    }
+
+    .record-cover-main p {
+        font-size: 7pt !important;
+    }
+
+    .record-reference {
+        margin-top: 2.5mm !important;
+        padding: 1.3mm 2.3mm !important;
+        font-size: 6.5pt !important;
+    }
+
+    .record-identity {
+        grid-template-columns: 1.45fr 1fr 1fr !important;
+        border-top-width: 3px !important;
+    }
+
+    .record-identity-item {
+        padding: 3mm 3.5mm !important;
+    }
+
+    .record-identity-item span {
+        min-height: 0 !important;
+        margin-bottom: 1mm !important;
+        font-size: 5.5pt !important;
+        letter-spacing: .4px !important;
+    }
+
+    .record-identity-item strong {
+        font-size: 8.5pt !important;
+        line-height: 1.2 !important;
+    }
+
+    .record-identity-item:nth-child(1)::before {
+        width: 2px !important;
+    }
+
+    .record-identity-item:nth-child(2) strong {
+        padding: 1mm 1.5mm !important;
+        font-size: 7.5pt !important;
+        border-radius: 2px !important;
+        box-shadow: none !important;
+    }
+
+    .record-identity-item:nth-child(3)::after {
+        display: none !important;
+    }
+
+    .record-section {
+        margin-bottom: 3mm !important;
+        border-radius: 3px !important;
+        box-shadow: none !important;
+        break-inside: auto !important;
+    }
+
+    .record-section-header {
+        gap: 2mm !important;
+        padding: 2mm 3mm !important;
+        border-bottom-width: 2px !important;
+        break-after: avoid;
+    }
+
+    .record-section-header::after {
+        display: none !important;
+    }
+
+    .record-section-number {
+        flex-basis: 6mm !important;
+        width: 6mm !important;
+        height: 6mm !important;
+        border: 0 !important;
+        border-radius: 1.5mm !important;
+        box-shadow: none !important;
+        font-size: 6pt !important;
+    }
+
+    .record-section-header h2 {
+        margin: 0 !important;
+        font-size: 8.5pt !important;
+        line-height: 1.1 !important;
+    }
+
+    .record-section-header p {
+        display: none !important;
+    }
+
+    .record-section-body {
+        padding: 2.5mm !important;
+        break-inside: auto !important;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Grouped cards
+    |--------------------------------------------------------------------------
+    */
+
+    .detail-card {
+        border-radius: 2px !important;
+        box-shadow: none !important;
+        break-inside: avoid;
+    }
+
+    .detail-card + .detail-card {
+        margin-top: 2mm !important;
+    }
+
+    .detail-card-header {
+        padding: 1.5mm 2.5mm !important;
+        font-size: 5.5pt !important;
+        letter-spacing: .35px !important;
+        break-after: avoid;
+    }
+
+    .detail-card-header::before {
+        width: 2px !important;
+    }
+
+    .detail-card-body {
+        padding: 2.3mm 2.7mm !important;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Fields
+    |--------------------------------------------------------------------------
+    */
+
+    .detail-grid {
+        grid-template-columns: repeat(
+            3,
+            minmax(0, 1fr)
+        ) !important;
+        gap: 2mm 3.5mm !important;
+    }
+
+    .detail-field.span-2 {
+        grid-column: span 2 !important;
+    }
+
+    .detail-field.span-3 {
+        grid-column: 1 / -1 !important;
+    }
+
+    .detail-field span {
+        margin-bottom: .6mm !important;
+        font-size: 5pt !important;
+        letter-spacing: .25px !important;
+    }
+
+    .detail-field strong {
+        font-size: 7pt !important;
+        line-height: 1.2 !important;
+    }
+
+    .detail-field.important strong {
+        font-size: 7.5pt !important;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Other areas of operation
+    |--------------------------------------------------------------------------
+    */
+
+    .operation-status {
+        margin-bottom: 2mm !important;
+        padding: 1.5mm 2mm !important;
+        border-radius: 2px !important;
+        font-size: 6pt !important;
+    }
+
+    .operation-status-mark {
+        width: 4mm !important;
+        height: 4mm !important;
+        flex-basis: 4mm !important;
+        font-size: 5pt !important;
+    }
+
+    .operation-location {
+        margin-top: 2mm !important;
+        border-radius: 2px !important;
+        break-inside: avoid;
+    }
+
+    .operation-location-header {
+        padding: 1.5mm 2.5mm !important;
+        font-size: 5.5pt !important;
+    }
+
+    .operation-location-body {
+        padding: 2.3mm 2.7mm !important;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Objectives and beneficiaries
+    |--------------------------------------------------------------------------
+    */
+
+    .selection-panel {
+        padding: .8mm !important;
+        border-radius: 2px !important;
+    }
+
+    .selection-grid {
+        grid-template-columns: repeat(
+            3,
+            minmax(0, 1fr)
+        ) !important;
+        gap: .8mm !important;
+    }
+
+    .selection-item {
+        min-height: 0 !important;
+        padding: 1.3mm 1.7mm !important;
+        border-radius: 2px !important;
+    }
+
+    .selection-mark {
+        flex-basis: 3mm !important;
+        width: 3mm !important;
+        height: 3mm !important;
+        font-size: 4.5pt !important;
+    }
+
+    .selection-item span:last-child {
+        font-size: 6pt !important;
+        line-height: 1.2 !important;
+    }
+
+    .description-box {
+        margin-top: 1.5mm !important;
+        padding: 1.7mm 2mm !important;
+        border-left-width: 2px !important;
+        border-radius: 2px !important;
+        break-inside: avoid;
+    }
+
+    .description-box span {
+        margin-bottom: .5mm !important;
+        font-size: 5pt !important;
+    }
+
+    .description-box p {
+        font-size: 6pt !important;
+        line-height: 1.25 !important;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Financial Year
+    |--------------------------------------------------------------------------
+    */
+
+    .financial-year-card {
+        padding: 2.7mm !important;
+        border-radius: 2px !important;
+        box-shadow: none !important;
+        break-inside: avoid;
+    }
+
+    .financial-year-card span {
+        margin-bottom: .7mm !important;
+        font-size: 5pt !important;
+    }
+
+    .financial-year-card strong {
+        font-size: 11pt !important;
+    }
+
+    .financial-year-badge {
+        margin-top: 1.2mm !important;
+        padding: .7mm 1.5mm !important;
+        font-size: 4.5pt !important;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Principal officials
+    |--------------------------------------------------------------------------
+    */
+
+    .official-grid {
+        grid-template-columns: repeat(
+            3,
+            minmax(0, 1fr)
+        ) !important;
+        gap: 2mm !important;
+    }
+
+    .official-card {
+        border-radius: 2px !important;
+        box-shadow: none !important;
+        break-inside: avoid;
+    }
+
+    .official-card-header {
+        padding: 1.6mm 2mm !important;
+        border-left-width: 2px !important;
+        break-after: avoid;
+    }
+
+    .official-card-header span {
+        margin-bottom: .3mm !important;
+        font-size: 4.5pt !important;
+    }
+
+    .official-card-header h3 {
+        font-size: 7.5pt !important;
+    }
+
+    .official-card-body {
+        padding: 2mm !important;
+    }
+
+    .official-card .detail-grid {
+        grid-template-columns: 1fr !important;
+        gap: 1.2mm !important;
+    }
+
+    .official-card .detail-field span {
+        margin-bottom: .3mm !important;
+        font-size: 4.5pt !important;
+    }
+
+    .official-card .detail-field strong {
+        font-size: 6pt !important;
+        line-height: 1.15 !important;
+    }
+
+    .official-card .detail-field.important strong {
+        font-size: 6.5pt !important;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Directors
+    |--------------------------------------------------------------------------
+    */
+
+    .directors-section {
+        margin-top: 2.5mm !important;
+        padding-top: 2mm !important;
+    }
+
+    .directors-heading {
+        margin-bottom: 1.5mm !important;
+    }
+
+    .directors-heading h3 {
+        font-size: 7.5pt !important;
+    }
+
+    .optional-badge {
+        padding: .6mm 1.2mm !important;
+        font-size: 4.5pt !important;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Signatures
+    |--------------------------------------------------------------------------
+    */
+
+    .signature-panel {
+        margin-top: 1.5mm !important;
+        padding: 1mm !important;
+        border-radius: 2px !important;
+    }
+
+    .signature-panel-label {
+        margin-bottom: .7mm !important;
+        font-size: 4.5pt !important;
+    }
+
+    .signature-preview {
+        min-height: 11mm !important;
+        padding: .8mm !important;
+        border-radius: 1px !important;
+    }
+
+    .signature-preview img {
+        max-width: 35mm !important;
+        max-height: 11mm !important;
+    }
+
+    .signature-document strong {
+        font-size: 6pt !important;
+    }
+
+    .signature-document span {
+        font-size: 5pt !important;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Record footer
+    |--------------------------------------------------------------------------
+    */
+
+    .record-footer {
+        margin-top: 2.5mm !important;
+        border-radius: 2px !important;
+        box-shadow: none !important;
+        break-inside: avoid;
+    }
+
+    .record-footer-accent {
+        height: 2px !important;
+    }
+
+    .record-footer-body {
+        padding: 2mm 2.5mm !important;
+    }
+
+    .record-footer-grid {
+        grid-template-columns: repeat(
+            4,
+            minmax(0, 1fr)
+        ) !important;
+        gap: 2.5mm !important;
+    }
+
+    .record-footer-item span {
+        margin-bottom: .3mm !important;
+        font-size: 4.5pt !important;
+    }
+
+    .record-footer-item strong {
+        font-size: 6pt !important;
+    }
+
+    .record-footer-note {
+        margin-top: 1.5mm !important;
+        padding-top: 1mm !important;
+        font-size: 5pt !important;
+        line-height: 1.25 !important;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Print color
+    |--------------------------------------------------------------------------
+    */
+
+    .record-cover-main,
+    .record-section-header,
+    .record-section-number,
+    .selection-mark,
+    .financial-year-badge,
+    .record-footer-accent,
+    .record-identity-item:nth-child(2) strong,
+    .operation-status.yes {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Page-break strategy
+    |--------------------------------------------------------------------------
+    */
+
+    .record-section-header,
+    .detail-card-header,
+    .official-card-header,
+    .operation-location-header {
+        break-after: avoid;
+    }
+
+    .record-section,
+    .record-section-body {
+        break-inside: auto !important;
+    }
+
+    .detail-card,
+    .official-card,
+    .financial-year-card,
+    .description-box,
+    .operation-location {
+        page-break-inside: avoid;
+        break-inside: avoid;
+    }
 
     a {
         color: inherit !important;
@@ -1520,14 +2121,14 @@ require_once __DIR__ . '/../includes/header.php';
 
 <div class="applications-page">
 
-    <div class="application-report">
+    <div class="pbo-record">
 
 
         <!-- ======================================================
              TOOLBAR
              ====================================================== -->
 
-        <div class="report-toolbar no-print">
+        <div class="record-toolbar no-print">
 
             <a
                 href="/pbo-portal/applications/records.php"
@@ -1537,7 +2138,21 @@ require_once __DIR__ . '/../includes/header.php';
             </a>
 
 
-            <div class="report-toolbar-actions">
+            <div class="record-toolbar-actions">
+
+                <a
+                    href="/pbo-portal/admin/verify-edit.php?id=<?= (int) $applicationId ?>"
+                    class="btn btn-warning"
+                >
+                    Edit Submitted Record
+                </a>
+
+                <a
+                    href="/pbo-portal/applications/export-excel.php?id=<?= (int) $applicationId ?>"
+                    class="btn btn-success"
+                >
+                    Export Excel
+                </a>
 
                 <button
                     type="button"
@@ -1553,55 +2168,55 @@ require_once __DIR__ . '/../includes/header.php';
 
 
         <!-- ======================================================
-             REPORT COVER
+             PBO RECORD COVER
              ====================================================== -->
 
-        <section class="report-cover">
+        <section class="record-cover">
 
-            <div class="report-cover-top">
+            <div class="record-cover-main">
 
-                <span
-                    style="
-                        display: block;
-                        font-size: 10px;
-                        font-weight: 800;
-                        letter-spacing: 1px;
-                        text-transform: uppercase;
-                        opacity: .8;
-                    "
-                >
+                <span class="record-authority">
                     Public Benefit Organizations Regulatory Authority
                 </span>
-
 
                 <h1>
                     PBO Registration Record
                 </h1>
 
-
                 <p>
                     Complete submitted application record
                 </p>
 
-
-                <div class="report-reference">
-
-                    <?= e(
-                        (string)
+                <?php if (
+                    hasValue(
                         $application[
                             'application_reference'
-                        ]
-                    ) ?>
+                        ] ?? ''
+                    )
+                ): ?>
 
-                </div>
+                    <div class="record-reference">
+
+                        Application Reference:
+                        &nbsp;
+
+                        <?= e(
+                            (string)
+                            $application[
+                                'application_reference'
+                            ]
+                        ) ?>
+
+                    </div>
+
+                <?php endif; ?>
 
             </div>
 
 
-            <div class="report-cover-bottom">
+            <div class="record-identity">
 
-
-                <div class="report-meta">
+                <div class="record-identity-item">
 
                     <span>
                         Organization
@@ -1609,56 +2224,42 @@ require_once __DIR__ . '/../includes/header.php';
 
                     <strong>
                         <?= displayValue(
-                            $application['pbo_name']
+                            $application[
+                                'pbo_name'
+                            ]
                         ) ?>
                     </strong>
 
                 </div>
 
 
-                <div class="report-meta">
+                <div class="record-identity-item">
 
                     <span>
-                        Type
+                        Registration Number
                     </span>
 
                     <strong>
-                        <?= e(
-                            organizationTypeLabel(
-                                (string)
-                                $application[
-                                    'registration_type'
-                                ]
-                            )
+                        <?= displayValue(
+                            $application[
+                                'pbo_registration_number'
+                            ]
                         ) ?>
                     </strong>
 
                 </div>
 
 
-                <div class="report-meta">
+                <div class="record-identity-item">
 
                     <span>
-                        Status
-                    </span>
-
-                    <strong class="report-status">
-                        &#10003; Submitted
-                    </strong>
-
-                </div>
-
-
-                <div class="report-meta">
-
-                    <span>
-                        Submitted
+                        Date of Registration
                     </span>
 
                     <strong>
-                        <?= $submittedDate !== ''
-                            ? e($submittedDate)
-                            : 'Not available' ?>
+                        <?= $registrationDate !== ''
+                            ? e($registrationDate)
+                            : '—' ?>
                     </strong>
 
                 </div>
@@ -1669,58 +2270,1952 @@ require_once __DIR__ . '/../includes/header.php';
 
 
         <!-- ======================================================
-             1. ORGANIZATION
+             1. ORGANIZATION DETAILS
              ====================================================== -->
 
-        <section class="report-section">
+        <section class="record-section">
 
-            <div class="report-section-header">
+            <div class="record-section-header">
 
-                <div class="report-section-number">
+                <div class="record-section-number">
                     1
                 </div>
 
                 <div>
 
                     <h2>
-                        Organization Particulars
+                        Organization Details
                     </h2>
+
+                    <p>
+                        Classification, address and contact particulars
+                    </p>
 
                 </div>
 
             </div>
 
 
-            <div class="report-section-body">
-
-                <div class="report-grid">
+            <div class="record-section-body">
 
 
-                    <div class="report-field">
+                <!-- ORGANIZATION CLASSIFICATION -->
 
-                        <span>
-                            Name of PBO
-                        </span>
+                <div class="detail-card">
 
-                        <strong>
-                            <?= displayValue(
-                                $application['pbo_name']
-                            ) ?>
-                        </strong>
+                    <div class="detail-card-header">
+                        Organization Classification
+                    </div>
+
+                    <div class="detail-card-body">
+
+                        <div class="detail-grid">
+
+                            <div class="detail-field important">
+
+                                <span>
+                                    Type of Organization
+                                </span>
+
+                                <strong>
+                                    <?= e(
+                                        organizationTypeLabel(
+                                            (string)
+                                            $application[
+                                                'registration_type'
+                                            ]
+                                        )
+                                    ) ?>
+                                </strong>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                <!-- ADDRESS & CONTACT -->
+
+                <div class="detail-card">
+
+                    <div class="detail-card-header">
+                        Headquarters Address &amp; Contact
+                    </div>
+
+                    <div class="detail-card-body">
+
+                        <div class="detail-grid">
+
+                            <div class="detail-field">
+
+                                <span>
+                                    County
+                                </span>
+
+                                <strong>
+                                    <?= displayValue(
+                                        $address['county']
+                                    ) ?>
+                                </strong>
+
+                            </div>
+
+
+                            <?php if (
+                                hasValue(
+                                    $address['town'] ?? ''
+                                )
+                            ): ?>
+
+                                <div class="detail-field">
+
+                                    <span>
+                                        Town / City
+                                    </span>
+
+                                    <strong>
+                                        <?= e(
+                                            (string)
+                                            $address['town']
+                                        ) ?>
+                                    </strong>
+
+                                </div>
+
+                            <?php endif; ?>
+
+
+                            <?php if (
+                                hasValue(
+                                    $address['sub_county'] ?? ''
+                                )
+                            ): ?>
+
+                                <div class="detail-field">
+
+                                    <span>
+                                        Sub-County
+                                    </span>
+
+                                    <strong>
+                                        <?= e(
+                                            (string)
+                                            $address['sub_county']
+                                        ) ?>
+                                    </strong>
+
+                                </div>
+
+                            <?php endif; ?>
+
+
+                            <div class="detail-field span-2">
+
+                                <span>
+                                    Physical Address
+                                </span>
+
+                                <strong>
+                                    <?= displayValue(
+                                        $address[
+                                            'physical_address'
+                                        ]
+                                    ) ?>
+                                </strong>
+
+                            </div>
+
+
+                            <div class="detail-field">
+
+                                <span>
+                                    Postal Address
+                                </span>
+
+                                <strong>
+                                    <?= displayValue(
+                                        $address[
+                                            'postal_address'
+                                        ]
+                                    ) ?>
+                                </strong>
+
+                            </div>
+
+
+                            <?php if (
+                                hasValue(
+                                    $address[
+                                        'postal_code'
+                                    ] ?? ''
+                                )
+                            ): ?>
+
+                                <div class="detail-field">
+
+                                    <span>
+                                        Postal Code
+                                    </span>
+
+                                    <strong>
+                                        <?= e(
+                                            (string)
+                                            $address[
+                                                'postal_code'
+                                            ]
+                                        ) ?>
+                                    </strong>
+
+                                </div>
+
+                            <?php endif; ?>
+
+
+                            <div class="detail-field">
+
+                                <span>
+                                    Organization Phone
+                                </span>
+
+                                <strong>
+                                    <?= displayValue(
+                                        $address[
+                                            'phone_number'
+                                        ]
+                                    ) ?>
+                                </strong>
+
+                            </div>
+
+
+                            <?php if (
+                                hasValue(
+                                    $address[
+                                        'alternative_phone_number'
+                                    ] ?? ''
+                                )
+                            ): ?>
+
+                                <div class="detail-field">
+
+                                    <span>
+                                        Alternative Phone
+                                    </span>
+
+                                    <strong>
+                                        <?= e(
+                                            (string)
+                                            $address[
+                                                'alternative_phone_number'
+                                            ]
+                                        ) ?>
+                                    </strong>
+
+                                </div>
+
+                            <?php endif; ?>
+
+
+                            <div class="detail-field span-2">
+
+                                <span>
+                                    Organization Email
+                                </span>
+
+                                <strong>
+                                    <?= displayValue(
+                                        $address['email']
+                                    ) ?>
+                                </strong>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                <!-- ==================================================
+                     OTHER AREAS OF OPERATION
+                     ================================================== -->
+
+                <div class="detail-card">
+
+                    <div class="detail-card-header">
+                        Other Areas of Operation
+                    </div>
+
+                    <div class="detail-card-body">
+
+                        <?php if (
+                            $operatingLocations !== []
+                        ): ?>
+
+                            <div class="operation-status yes">
+
+                                <span class="operation-status-mark">
+                                    &#10003;
+                                </span>
+
+                                <span>
+                                    Yes — <?= count(
+                                        $operatingLocations
+                                    ) ?> additional
+                                    operating
+                                    <?= count(
+                                        $operatingLocations
+                                    ) === 1
+                                        ? 'location'
+                                        : 'locations' ?>
+                                    recorded.
+                                </span>
+
+                            </div>
+
+
+                            <?php foreach (
+                                $operatingLocations
+                                as $index => $location
+                            ): ?>
+
+                                <div class="operation-location">
+
+                                    <div class="operation-location-header">
+                                        Additional Operating Location
+                                        <?= $index + 1 ?>
+                                    </div>
+
+                                    <div class="operation-location-body">
+
+                                        <div class="detail-grid">
+
+
+                                            <div class="detail-field">
+
+                                                <span>
+                                                    County
+                                                </span>
+
+                                                <strong>
+                                                    <?= displayValue(
+                                                        $location[
+                                                            'county'
+                                                        ] ?? ''
+                                                    ) ?>
+                                                </strong>
+
+                                            </div>
+
+
+                                            <?php if (
+                                                hasValue(
+                                                    $location[
+                                                        'sub_county'
+                                                    ] ?? ''
+                                                )
+                                            ): ?>
+
+                                                <div class="detail-field">
+
+                                                    <span>
+                                                        Sub-County
+                                                    </span>
+
+                                                    <strong>
+                                                        <?= e(
+                                                            (string)
+                                                            $location[
+                                                                'sub_county'
+                                                            ]
+                                                        ) ?>
+                                                    </strong>
+
+                                                </div>
+
+                                            <?php endif; ?>
+
+
+                                            <div class="detail-field span-2">
+
+                                                <span>
+                                                    Physical Address
+                                                </span>
+
+                                                <strong>
+                                                    <?= displayValue(
+                                                        $location[
+                                                            'physical_address'
+                                                        ] ?? ''
+                                                    ) ?>
+                                                </strong>
+
+                                            </div>
+
+
+                                            <div class="detail-field">
+
+                                                <span>
+                                                    Postal Address
+                                                </span>
+
+                                                <strong>
+                                                    <?= displayValue(
+                                                        $location[
+                                                            'postal_address'
+                                                        ] ?? ''
+                                                    ) ?>
+                                                </strong>
+
+                                            </div>
+
+
+                                            <?php if (
+                                                hasValue(
+                                                    $location[
+                                                        'postal_code'
+                                                    ] ?? ''
+                                                )
+                                            ): ?>
+
+                                                <div class="detail-field">
+
+                                                    <span>
+                                                        Postal Code
+                                                    </span>
+
+                                                    <strong>
+                                                        <?= e(
+                                                            (string)
+                                                            $location[
+                                                                'postal_code'
+                                                            ]
+                                                        ) ?>
+                                                    </strong>
+
+                                                </div>
+
+                                            <?php endif; ?>
+
+
+                                            <div class="detail-field">
+
+                                                <span>
+                                                    Phone
+                                                </span>
+
+                                                <strong>
+                                                    <?= displayValue(
+                                                        $location[
+                                                            'phone_number'
+                                                        ] ?? ''
+                                                    ) ?>
+                                                </strong>
+
+                                            </div>
+
+
+                                            <?php if (
+                                                hasValue(
+                                                    $location[
+                                                        'alternative_phone_number'
+                                                    ] ?? ''
+                                                )
+                                            ): ?>
+
+                                                <div class="detail-field">
+
+                                                    <span>
+                                                        Alternative Phone
+                                                    </span>
+
+                                                    <strong>
+                                                        <?= e(
+                                                            (string)
+                                                            $location[
+                                                                'alternative_phone_number'
+                                                            ]
+                                                        ) ?>
+                                                    </strong>
+
+                                                </div>
+
+                                            <?php endif; ?>
+
+
+                                            <div class="detail-field span-2">
+
+                                                <span>
+                                                    Email
+                                                </span>
+
+                                                <strong>
+                                                    <?= displayValue(
+                                                        $location[
+                                                            'email'
+                                                        ] ?? ''
+                                                    ) ?>
+                                                </strong>
+
+                                            </div>
+
+                                        </div>
+
+                                    </div>
+
+                                </div>
+
+                            <?php endforeach; ?>
+
+
+                        <?php else: ?>
+
+                            <div class="operation-status no">
+
+                                <span class="operation-status-mark">
+                                    &mdash;
+                                </span>
+
+                                <span>
+                                    No — no additional operating
+                                    locations have been recorded.
+                                </span>
+
+                            </div>
+
+                        <?php endif; ?>
+
+                    </div>
+
+                </div>
+
+
+                <!-- ==================================================
+                     INTERNATIONAL ORGANIZATION
+                     ================================================== -->
+
+                <?php if (
+                    $application[
+                        'registration_type'
+                    ] === 'international' &&
+                    $internationalDetails !== null
+                ): ?>
+
+                    <div class="detail-card">
+
+                        <div class="detail-card-header gold">
+                            International Registration Details
+                        </div>
+
+                        <div class="detail-card-body">
+
+                            <div class="detail-grid">
+
+
+                                <div class="detail-field important">
+
+                                    <span>
+                                        Parent Organization
+                                    </span>
+
+                                    <strong>
+                                        <?= displayValue(
+                                            $internationalDetails[
+                                                'parent_organization_name'
+                                            ]
+                                        ) ?>
+                                    </strong>
+
+                                </div>
+
+
+                                <div class="detail-field">
+
+                                    <span>
+                                        Country of Registration
+                                    </span>
+
+                                    <strong>
+                                        <?= displayValue(
+                                            $internationalDetails[
+                                                'country_of_origin'
+                                            ]
+                                        ) ?>
+                                    </strong>
+
+                                </div>
+
+
+                                <div class="detail-field">
+
+                                    <span>
+                                        Parent Registration Number
+                                    </span>
+
+                                    <strong>
+                                        <?= displayValue(
+                                            $internationalDetails[
+                                                'registration_number'
+                                            ]
+                                        ) ?>
+                                    </strong>
+
+                                </div>
+
+
+                                <div class="detail-field">
+
+                                    <span>
+                                        Parent Physical Address
+                                    </span>
+
+                                    <strong>
+                                        <?= displayValue(
+                                            $internationalDetails[
+                                                'parent_physical_address'
+                                            ]
+                                        ) ?>
+                                    </strong>
+
+                                </div>
+
+
+                                <div class="detail-field">
+
+                                    <span>
+                                        Parent Postal Address
+                                    </span>
+
+                                    <strong>
+                                        <?= displayValue(
+                                            $internationalDetails[
+                                                'parent_postal_address'
+                                            ]
+                                        ) ?>
+                                    </strong>
+
+                                </div>
+
+
+                                <div class="detail-field">
+
+                                    <span>
+                                        Parent Postal Code
+                                    </span>
+
+                                    <strong>
+                                        <?= displayValue(
+                                            $internationalDetails[
+                                                'parent_postal_code'
+                                            ]
+                                        ) ?>
+                                    </strong>
+
+                                </div>
+
+
+                                <div class="detail-field">
+
+                                    <span>
+                                        Parent Phone
+                                    </span>
+
+                                    <strong>
+                                        <?= displayValue(
+                                            $internationalDetails[
+                                                'parent_phone_number'
+                                            ]
+                                        ) ?>
+                                    </strong>
+
+                                </div>
+
+
+                                <div class="detail-field span-2">
+
+                                    <span>
+                                        Parent Email
+                                    </span>
+
+                                    <strong>
+                                        <?= displayValue(
+                                            $internationalDetails[
+                                                'parent_email'
+                                            ]
+                                        ) ?>
+                                    </strong>
+
+                                </div>
+
+                            </div>
+
+                        </div>
 
                     </div>
 
 
-                    <div class="report-field">
+                    <div class="detail-card">
+
+                        <div class="detail-card-header gold">
+                            Parent Organization Contact Person
+                        </div>
+
+                        <div class="detail-card-body">
+
+                            <div class="detail-grid">
+
+
+                                <div class="detail-field">
+
+                                    <span>
+                                        Contact Person
+                                    </span>
+
+                                    <strong>
+                                        <?= displayValue(
+                                            $internationalDetails[
+                                                'contact_person_name'
+                                            ]
+                                        ) ?>
+                                    </strong>
+
+                                </div>
+
+
+                                <div class="detail-field">
+
+                                    <span>
+                                        Contact Person Phone
+                                    </span>
+
+                                    <strong>
+                                        <?= displayValue(
+                                            $internationalDetails[
+                                                'contact_person_phone'
+                                            ]
+                                        ) ?>
+                                    </strong>
+
+                                </div>
+
+
+                                <div class="detail-field">
+
+                                    <span>
+                                        Contact Person Email
+                                    </span>
+
+                                    <strong>
+                                        <?= displayValue(
+                                            $internationalDetails[
+                                                'contact_person_email'
+                                            ]
+                                        ) ?>
+                                    </strong>
+
+                                </div>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                <?php endif; ?>
+
+            </div>
+
+        </section>
+
+
+        <!-- ======================================================
+             2. PUBLIC BENEFIT PURPOSES
+             ====================================================== -->
+
+        <section class="record-section">
+
+            <div class="record-section-header">
+
+                <div class="record-section-number">
+                    2
+                </div>
+
+                <div>
+
+                    <h2>
+                        Public Benefit Purposes
+                    </h2>
+
+                    <p>
+                        Registered areas of public benefit activity
+                    </p>
+
+                </div>
+
+            </div>
+
+
+            <div class="record-section-body">
+
+                <?php if (
+                    $objectives !== []
+                ): ?>
+
+                    <div class="selection-panel">
+
+                        <div class="selection-grid">
+
+                            <?php foreach (
+                                $objectives
+                                as $objective
+                            ): ?>
+
+                                <?php
+
+                                $objectiveCode =
+                                    (string)
+                                    $objective[
+                                        'objective_code'
+                                    ];
+
+                                $objectiveLabel =
+                                    $objectiveLabels[
+                                        $objectiveCode
+                                    ]
+                                    ??
+                                    ucwords(
+                                        strtolower(
+                                            str_replace(
+                                                '_',
+                                                ' ',
+                                                $objectiveCode
+                                            )
+                                        )
+                                    );
+
+                                ?>
+
+                                <div class="selection-item">
+
+                                    <span class="selection-mark">
+                                        &#10003;
+                                    </span>
+
+                                    <span>
+                                        <?= e(
+                                            $objectiveLabel
+                                        ) ?>
+                                    </span>
+
+                                </div>
+
+                            <?php endforeach; ?>
+
+                        </div>
+
+                    </div>
+
+
+                    <?php foreach (
+                        $objectives
+                        as $objective
+                    ): ?>
+
+                        <?php if (
+                            (string)
+                            $objective[
+                                'objective_code'
+                            ] === 'OTHER' &&
+                            hasValue(
+                                $objective[
+                                    'description'
+                                ] ?? ''
+                            )
+                        ): ?>
+
+                            <div class="description-box">
+
+                                <span>
+                                    Any Other — Description
+                                </span>
+
+                                <p>
+                                    <?= e(
+                                        (string)
+                                        $objective[
+                                            'description'
+                                        ]
+                                    ) ?>
+                                </p>
+
+                            </div>
+
+                        <?php endif; ?>
+
+                    <?php endforeach; ?>
+
+                <?php else: ?>
+
+                    <p class="text-muted">
+                        No public benefit purposes recorded.
+                    </p>
+
+                <?php endif; ?>
+
+            </div>
+
+        </section>
+
+
+        <!-- ======================================================
+             3. BENEFICIARIES
+             ====================================================== -->
+
+        <section class="record-section">
+
+            <div class="record-section-header">
+
+                <div class="record-section-number">
+                    3
+                </div>
+
+                <div>
+
+                    <h2>
+                        Beneficiaries
+                    </h2>
+
+                    <p>
+                        Persons or groups served by the organization
+                    </p>
+
+                </div>
+
+            </div>
+
+
+            <div class="record-section-body">
+
+                <?php
+
+                $isPublic = false;
+
+                foreach (
+                    $beneficiaries
+                    as $beneficiary
+                ) {
+                    if (
+                        (string)
+                        $beneficiary[
+                            'beneficiary_code'
+                        ] === 'PUBLIC'
+                    ) {
+                        $isPublic = true;
+                        break;
+                    }
+                }
+
+                ?>
+
+
+                <?php if ($isPublic): ?>
+
+                    <div class="detail-card">
+
+                        <div class="detail-card-header">
+                            Beneficiary Category
+                        </div>
+
+                        <div class="detail-card-body">
+
+                            <div class="detail-field important">
+
+                                <span>
+                                    Scope
+                                </span>
+
+                                <strong>
+                                    Public
+                                </strong>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+
+                <?php elseif (
+                    $beneficiaries !== []
+                ): ?>
+
+                    <div class="detail-card">
+
+                        <div class="detail-card-header">
+                            Beneficiary Category
+                        </div>
+
+                        <div class="detail-card-body">
+
+                            <div class="detail-field important">
+
+                                <span>
+                                    Scope
+                                </span>
+
+                                <strong>
+                                    Section of the Public
+                                </strong>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+
+                    <div
+                        class="selection-panel"
+                        style="margin-top: 15px;"
+                    >
+
+                        <div class="selection-grid">
+
+                            <?php foreach (
+                                $beneficiaries
+                                as $beneficiary
+                            ): ?>
+
+                                <?php
+
+                                $beneficiaryCode =
+                                    (string)
+                                    $beneficiary[
+                                        'beneficiary_code'
+                                    ];
+
+                                if (
+                                    $beneficiaryCode ===
+                                    'PUBLIC'
+                                ) {
+                                    continue;
+                                }
+
+                                $beneficiaryLabel =
+                                    $beneficiaryLabels[
+                                        $beneficiaryCode
+                                    ]
+                                    ??
+                                    ucwords(
+                                        strtolower(
+                                            str_replace(
+                                                '_',
+                                                ' ',
+                                                $beneficiaryCode
+                                            )
+                                        )
+                                    );
+
+                                ?>
+
+                                <div class="selection-item">
+
+                                    <span class="selection-mark">
+                                        &#10003;
+                                    </span>
+
+                                    <span>
+                                        <?= e(
+                                            $beneficiaryLabel
+                                        ) ?>
+                                    </span>
+
+                                </div>
+
+                            <?php endforeach; ?>
+
+                        </div>
+
+                    </div>
+
+
+                    <?php foreach (
+                        $beneficiaries
+                        as $beneficiary
+                    ): ?>
+
+                        <?php if (
+                            (string)
+                            $beneficiary[
+                                'beneficiary_code'
+                            ] === 'OTHER'
+                        ): ?>
+
+                            <?php
+
+                            $otherSpecify = '';
+                            $otherDescription = '';
+
+                            $storedOther =
+                                trim(
+                                    (string)
+                                    (
+                                        $beneficiary[
+                                            'description'
+                                        ] ?? ''
+                                    )
+                                );
+
+                            if (
+                                $storedOther !== ''
+                            ) {
+                                $decodedOther =
+                                    json_decode(
+                                        $storedOther,
+                                        true
+                                    );
+
+                                if (
+                                    is_array(
+                                        $decodedOther
+                                    )
+                                ) {
+                                    $otherSpecify =
+                                        trim(
+                                            (string)
+                                            (
+                                                $decodedOther[
+                                                    'specify'
+                                                ] ?? ''
+                                            )
+                                        );
+
+                                    $otherDescription =
+                                        trim(
+                                            (string)
+                                            (
+                                                $decodedOther[
+                                                    'description'
+                                                ] ?? ''
+                                            )
+                                        );
+                                } else {
+                                    $otherDescription =
+                                        $storedOther;
+                                }
+                            }
+
+                            ?>
+
+                            <?php if (
+                                $otherSpecify !== '' ||
+                                $otherDescription !== ''
+                            ): ?>
+
+                                <div class="description-box">
+
+                                    <span>
+                                        Others Not Listed Here
+                                    </span>
+
+                                    <?php if (
+                                        $otherSpecify !== ''
+                                    ): ?>
+
+                                        <p>
+
+                                            <strong>
+                                                Specify:
+                                            </strong>
+
+                                            <?= e(
+                                                $otherSpecify
+                                            ) ?>
+
+                                        </p>
+
+                                    <?php endif; ?>
+
+
+                                    <?php if (
+                                        $otherDescription !== ''
+                                    ): ?>
+
+                                        <p>
+
+                                            <strong>
+                                                Description:
+                                            </strong>
+
+                                            <?= e(
+                                                $otherDescription
+                                            ) ?>
+
+                                        </p>
+
+                                    <?php endif; ?>
+
+                                </div>
+
+                            <?php endif; ?>
+
+                        <?php endif; ?>
+
+                    <?php endforeach; ?>
+
+
+                <?php else: ?>
+
+                    <p class="text-muted">
+                        No beneficiary information recorded.
+                    </p>
+
+                <?php endif; ?>
+
+            </div>
+
+        </section>
+
+
+        <!-- ======================================================
+             4. FINANCIAL YEAR
+             ====================================================== -->
+
+        <section class="record-section">
+
+            <div class="record-section-header">
+
+                <div class="record-section-number">
+                    4
+                </div>
+
+                <div>
+
+                    <h2>
+                        Financial Year
+                    </h2>
+
+                    <p>
+                        Approved twelve-month reporting period
+                    </p>
+
+                </div>
+
+            </div>
+
+
+            <div class="record-section-body">
+
+                <?php if (
+                    $financialYearLabel !== ''
+                ): ?>
+
+                    <div class="financial-year-card">
 
                         <span>
-                            PBO Registration Number
+                            Selected Financial Year
+                        </span>
+
+                        <strong>
+                            <?= e(
+                                $financialYearLabel
+                            ) ?>
+                        </strong>
+
+                        <div class="financial-year-badge">
+                            12 Month Period
+                        </div>
+
+                    </div>
+
+                <?php else: ?>
+
+                    <p class="text-muted">
+                        Financial year information is not available.
+                    </p>
+
+                <?php endif; ?>
+
+            </div>
+
+        </section>
+
+
+        <!-- ======================================================
+             5. PRINCIPAL OFFICIALS
+             ====================================================== -->
+
+        <section class="record-section">
+
+            <div class="record-section-header">
+
+                <div class="record-section-number">
+                    5
+                </div>
+
+                <div>
+
+                    <h2>
+                        Principal Officials
+                    </h2>
+
+                    <p>
+                        Chairperson, Treasurer and Secretary
+                    </p>
+
+                </div>
+
+            </div>
+
+
+            <div class="record-section-body">
+
+                <div class="official-grid">
+
+                    <?php foreach (
+                        [
+                            'CHAIRPERSON',
+                            'TREASURER',
+                            'SECRETARY',
+                        ]
+                        as $designation
+                    ): ?>
+
+                        <?php
+
+                        $official =
+                            $principalOfficials[
+                                $designation
+                            ];
+
+                        if (
+                            $official === null
+                        ) {
+                            continue;
+                        }
+
+                        $signature =
+                            trim(
+                                (string)
+                                (
+                                    $official[
+                                        'signature'
+                                    ] ?? ''
+                                )
+                            );
+
+                        $signatureExt =
+                            $signature !== ''
+                                ? signatureExtension(
+                                    $signature
+                                )
+                                : '';
+
+                        $imageSignature =
+                            in_array(
+                                $signatureExt,
+                                [
+                                    'jpg',
+                                    'jpeg',
+                                    'png',
+                                    'webp',
+                                ],
+                                true
+                            );
+
+                        $pdfSignature =
+                            $signatureExt === 'pdf';
+
+                        ?>
+
+                        <article class="official-card">
+
+                            <div class="official-card-header">
+
+                                <span>
+                                    Principal Official
+                                </span>
+
+                                <h3>
+                                    <?= e(
+                                        designationLabel(
+                                            $designation
+                                        )
+                                    ) ?>
+                                </h3>
+
+                            </div>
+
+
+                            <div class="official-card-body">
+
+                                <div class="detail-grid">
+
+
+                                    <div class="detail-field important">
+
+                                        <span>
+                                            Name
+                                        </span>
+
+                                        <strong>
+                                            <?= displayValue(
+                                                $official[
+                                                    'full_name'
+                                                ]
+                                            ) ?>
+                                        </strong>
+
+                                    </div>
+
+
+                                    <div class="detail-field">
+
+                                        <span>
+                                            Nationality
+                                        </span>
+
+                                        <strong>
+                                            <?= displayValue(
+                                                $official[
+                                                    'nationality'
+                                                ]
+                                            ) ?>
+                                        </strong>
+
+                                    </div>
+
+
+                                    <div class="detail-field">
+
+                                        <span>
+                                            ID / Passport Number
+                                        </span>
+
+                                        <strong>
+                                            <?= displayValue(
+                                                $official[
+                                                    'id_passport_number'
+                                                ]
+                                            ) ?>
+                                        </strong>
+
+                                    </div>
+
+
+                                    <div class="detail-field">
+
+                                        <span>
+                                            KRA PIN
+                                        </span>
+
+                                        <strong>
+                                            <?= displayValue(
+                                                $official[
+                                                    'kra_pin'
+                                                ]
+                                            ) ?>
+                                        </strong>
+
+                                    </div>
+
+
+                                    <div class="detail-field">
+
+                                        <span>
+                                            Phone Number
+                                        </span>
+
+                                        <strong>
+                                            <?= displayValue(
+                                                $official[
+                                                    'phone_number'
+                                                ]
+                                            ) ?>
+                                        </strong>
+
+                                    </div>
+
+
+                                    <div class="detail-field">
+
+                                        <span>
+                                            Email
+                                        </span>
+
+                                        <strong>
+                                            <?= displayValue(
+                                                $official[
+                                                    'email'
+                                                ]
+                                            ) ?>
+                                        </strong>
+
+                                    </div>
+
+                                </div>
+
+
+                                <?php if (
+                                    $signature !== ''
+                                ): ?>
+
+                                    <div class="signature-panel">
+
+                                        <span class="signature-panel-label">
+                                            Signature
+                                        </span>
+
+
+                                        <?php if (
+                                            $imageSignature
+                                        ): ?>
+
+                                            <div class="signature-preview">
+
+                                                <img
+                                                    src="<?= e(
+                                                        $signature
+                                                    ) ?>"
+                                                    alt="<?= e(
+                                                        (string)
+                                                        $official[
+                                                            'full_name'
+                                                        ]
+                                                    ) ?> signature"
+                                                    loading="lazy"
+                                                >
+
+                                            </div>
+
+
+                                        <?php elseif (
+                                            $pdfSignature
+                                        ): ?>
+
+                                            <div class="signature-preview">
+
+                                                <div class="signature-document">
+
+                                                    <div>
+
+                                                        <strong>
+                                                            Signature Document
+                                                        </strong>
+
+                                                        <span>
+                                                            PDF signature file
+                                                        </span>
+
+                                                    </div>
+
+                                                    <a
+                                                        href="<?= e(
+                                                            $signature
+                                                        ) ?>"
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        class="btn btn-secondary btn-sm no-print"
+                                                    >
+                                                        View PDF
+                                                    </a>
+
+                                                </div>
+
+                                            </div>
+
+
+                                        <?php else: ?>
+
+                                            <div class="signature-preview">
+
+                                                <div class="signature-document">
+
+                                                    <div>
+
+                                                        <strong>
+                                                            Signature Document
+                                                        </strong>
+
+                                                        <span>
+                                                            Attached signature file
+                                                        </span>
+
+                                                    </div>
+
+                                                    <a
+                                                        href="<?= e(
+                                                            $signature
+                                                        ) ?>"
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        class="btn btn-secondary btn-sm no-print"
+                                                    >
+                                                        Open File
+                                                    </a>
+
+                                                </div>
+
+                                            </div>
+
+                                        <?php endif; ?>
+
+                                    </div>
+
+                                <?php endif; ?>
+
+                            </div>
+
+                        </article>
+
+                    <?php endforeach; ?>
+
+                </div>
+
+
+                <!-- ==================================================
+                     OPTIONAL ADDITIONAL DIRECTORS
+                     ================================================== -->
+
+                <?php if (
+                    $directors !== []
+                ): ?>
+
+                    <div class="directors-section">
+
+                        <div class="directors-heading">
+
+                            <h3>
+                                Additional Directors
+                            </h3>
+
+                            <span class="optional-badge">
+                                Optional
+                            </span>
+
+                        </div>
+
+
+                        <div class="official-grid">
+
+                            <?php foreach (
+                                $directors
+                                as $index => $director
+                            ): ?>
+
+                                <?php
+
+                                $signature =
+                                    trim(
+                                        (string)
+                                        (
+                                            $director[
+                                                'signature'
+                                            ] ?? ''
+                                        )
+                                    );
+
+                                $signatureExt =
+                                    $signature !== ''
+                                        ? signatureExtension(
+                                            $signature
+                                        )
+                                        : '';
+
+                                $imageSignature =
+                                    in_array(
+                                        $signatureExt,
+                                        [
+                                            'jpg',
+                                            'jpeg',
+                                            'png',
+                                            'webp',
+                                        ],
+                                        true
+                                    );
+
+                                $pdfSignature =
+                                    $signatureExt === 'pdf';
+
+                                ?>
+
+                                <article class="official-card">
+
+                                    <div class="official-card-header director">
+
+                                        <span>
+                                            Additional Director
+                                        </span>
+
+                                        <h3>
+                                            Director
+                                            <?= $index + 1 ?>
+                                        </h3>
+
+                                    </div>
+
+
+                                    <div class="official-card-body">
+
+                                        <div class="detail-grid">
+
+
+                                            <div class="detail-field important">
+
+                                                <span>
+                                                    Name
+                                                </span>
+
+                                                <strong>
+                                                    <?= displayValue(
+                                                        $director[
+                                                            'full_name'
+                                                        ]
+                                                    ) ?>
+                                                </strong>
+
+                                            </div>
+
+
+                                            <div class="detail-field">
+
+                                                <span>
+                                                    Nationality
+                                                </span>
+
+                                                <strong>
+                                                    <?= displayValue(
+                                                        $director[
+                                                            'nationality'
+                                                        ]
+                                                    ) ?>
+                                                </strong>
+
+                                            </div>
+
+
+                                            <div class="detail-field">
+
+                                                <span>
+                                                    ID / Passport Number
+                                                </span>
+
+                                                <strong>
+                                                    <?= displayValue(
+                                                        $director[
+                                                            'id_passport_number'
+                                                        ]
+                                                    ) ?>
+                                                </strong>
+
+                                            </div>
+
+
+                                            <div class="detail-field">
+
+                                                <span>
+                                                    KRA PIN
+                                                </span>
+
+                                                <strong>
+                                                    <?= displayValue(
+                                                        $director[
+                                                            'kra_pin'
+                                                        ]
+                                                    ) ?>
+                                                </strong>
+
+                                            </div>
+
+
+                                            <div class="detail-field">
+
+                                                <span>
+                                                    Phone Number
+                                                </span>
+
+                                                <strong>
+                                                    <?= displayValue(
+                                                        $director[
+                                                            'phone_number'
+                                                        ]
+                                                    ) ?>
+                                                </strong>
+
+                                            </div>
+
+
+                                            <div class="detail-field">
+
+                                                <span>
+                                                    Email
+                                                </span>
+
+                                                <strong>
+                                                    <?= displayValue(
+                                                        $director[
+                                                            'email'
+                                                        ]
+                                                    ) ?>
+                                                </strong>
+
+                                            </div>
+
+                                        </div>
+
+
+                                        <?php if (
+                                            $signature !== ''
+                                        ): ?>
+
+                                            <div class="signature-panel">
+
+                                                <span class="signature-panel-label">
+                                                    Signature
+                                                </span>
+
+
+                                                <?php if (
+                                                    $imageSignature
+                                                ): ?>
+
+                                                    <div class="signature-preview">
+
+                                                        <img
+                                                            src="<?= e(
+                                                                $signature
+                                                            ) ?>"
+                                                            alt="<?= e(
+                                                                (string)
+                                                                $director[
+                                                                    'full_name'
+                                                                ]
+                                                            ) ?> signature"
+                                                            loading="lazy"
+                                                        >
+
+                                                    </div>
+
+
+                                                <?php elseif (
+                                                    $pdfSignature
+                                                ): ?>
+
+                                                    <div class="signature-preview">
+
+                                                        <div class="signature-document">
+
+                                                            <div>
+
+                                                                <strong>
+                                                                    Signature Document
+                                                                </strong>
+
+                                                                <span>
+                                                                    PDF signature file
+                                                                </span>
+
+                                                            </div>
+
+                                                            <a
+                                                                href="<?= e(
+                                                                    $signature
+                                                                ) ?>"
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                class="btn btn-secondary btn-sm no-print"
+                                                            >
+                                                                View PDF
+                                                            </a>
+
+                                                        </div>
+
+                                                    </div>
+
+
+                                                <?php else: ?>
+
+                                                    <div class="signature-preview">
+
+                                                        <div class="signature-document">
+
+                                                            <div>
+
+                                                                <strong>
+                                                                    Signature Document
+                                                                </strong>
+
+                                                                <span>
+                                                                    Attached signature file
+                                                                </span>
+
+                                                            </div>
+
+                                                            <a
+                                                                href="<?= e(
+                                                                    $signature
+                                                                ) ?>"
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                class="btn btn-secondary btn-sm no-print"
+                                                            >
+                                                                Open File
+                                                            </a>
+
+                                                        </div>
+
+                                                    </div>
+
+                                                <?php endif; ?>
+
+                                            </div>
+
+                                        <?php endif; ?>
+
+                                    </div>
+
+                                </article>
+
+                            <?php endforeach; ?>
+
+                        </div>
+
+                    </div>
+
+                <?php endif; ?>
+
+            </div>
+
+        </section>
+
+
+        <!-- ======================================================
+             RECORD INFORMATION
+             ====================================================== -->
+
+        <section class="record-footer">
+
+            <div class="record-footer-accent"></div>
+
+            <div class="record-footer-body">
+
+                <div class="record-footer-grid">
+
+
+                    <div class="record-footer-item">
+
+                        <span>
+                            Application Reference
                         </span>
 
                         <strong>
                             <?= displayValue(
                                 $application[
-                                    'pbo_registration_number'
+                                    'application_reference'
                                 ]
                             ) ?>
                         </strong>
@@ -1728,7 +4223,35 @@ require_once __DIR__ . '/../includes/header.php';
                     </div>
 
 
-                    <div class="report-field">
+                    <div class="record-footer-item">
+
+                        <span>
+                            Record Status
+                        </span>
+
+                        <strong class="submitted">
+                            Submitted
+                        </strong>
+
+                    </div>
+
+
+                    <div class="record-footer-item">
+
+                        <span>
+                            Submitted Date
+                        </span>
+
+                        <strong>
+                            <?= $submittedDate !== ''
+                                ? e($submittedDate)
+                                : '—' ?>
+                        </strong>
+
+                    </div>
+
+
+                    <div class="record-footer-item">
 
                         <span>
                             Type of Organization
@@ -1749,163 +4272,14 @@ require_once __DIR__ . '/../includes/header.php';
 
                 </div>
 
-            </div>
 
-        </section>
+                <div class="record-footer-note">
 
+                    This record presents the information captured in the
+                    PBO Registration System for this submitted application.
 
-        <!-- ======================================================
-             2. ADDRESS
-             ====================================================== -->
-
-        <section class="report-section">
-
-            <div class="report-section-header">
-
-                <div class="report-section-number">
-                    2
-                </div>
-
-                <div>
-
-                    <h2>
-                        Organization Address
-                    </h2>
-
-                </div>
-
-            </div>
-
-
-            <div class="report-section-body">
-
-                <div class="report-grid">
-
-
-                    <div class="report-field">
-
-                        <span>
-                            County
-                        </span>
-
-                        <strong>
-                            <?= displayValue(
-                                $address['county']
-                            ) ?>
-                        </strong>
-
-                    </div>
-
-
-                    <div class="report-field">
-
-                        <span>
-                            Sub-County
-                        </span>
-
-                        <strong>
-                            <?= displayValue(
-                                $address['sub_county']
-                            ) ?>
-                        </strong>
-
-                    </div>
-
-
-                    <div class="report-field">
-
-                        <span>
-                            Physical Address
-                        </span>
-
-                        <strong>
-                            <?= displayValue(
-                                $address[
-                                    'physical_address'
-                                ]
-                            ) ?>
-                        </strong>
-
-                    </div>
-
-
-                    <div class="report-field">
-
-                        <span>
-                            Postal Address
-                        </span>
-
-                        <strong>
-                            <?= displayValue(
-                                $address[
-                                    'postal_address'
-                                ]
-                            ) ?>
-                        </strong>
-
-                    </div>
-
-
-                    <div class="report-field">
-
-                        <span>
-                            Postal Code
-                        </span>
-
-                        <strong>
-                            <?= displayValue(
-                                $address['postal_code']
-                            ) ?>
-                        </strong>
-
-                    </div>
-
-
-                    <div class="report-field">
-
-                        <span>
-                            Organization Phone
-                        </span>
-
-                        <strong>
-                            <?= displayValue(
-                                $address['phone_number']
-                            ) ?>
-                        </strong>
-
-                    </div>
-
-
-                    <div class="report-field">
-
-                        <span>
-                            Alternative Phone
-                        </span>
-
-                        <strong>
-                            <?= displayValue(
-                                $address[
-                                    'alternative_phone_number'
-                                ]
-                            ) ?>
-                        </strong>
-
-                    </div>
-
-
-                    <div class="report-field">
-
-                        <span>
-                            Email
-                        </span>
-
-                        <strong>
-                            <?= displayValue(
-                                $address['email']
-                            ) ?>
-                        </strong>
-
-                    </div>
+                    Optional information that was not supplied is intentionally
+                    omitted from the record.
 
                 </div>
 
@@ -1915,1337 +4289,55 @@ require_once __DIR__ . '/../includes/header.php';
 
 
         <!-- ======================================================
-             INTERNATIONAL DETAILS
+             BOTTOM ACTIONS
              ====================================================== -->
-
-        <?php if (
-            $application['registration_type'] ===
-            'international' &&
-            $internationalDetails !== null
-        ): ?>
-
-            <section class="report-section">
-
-                <div class="report-section-header">
-
-                    <div class="report-section-number">
-                        3
-                    </div>
-
-                    <div>
-
-                        <h2>
-                            International Registration Status
-                        </h2>
-
-                    </div>
-
-                </div>
-
-
-                <div class="report-section-body">
-
-                    <div class="report-grid">
-
-
-                        <div class="report-field">
-
-                            <span>
-                                Parent Organization
-                            </span>
-
-                            <strong>
-                                <?= displayValue(
-                                    $internationalDetails[
-                                        'parent_organization_name'
-                                    ]
-                                ) ?>
-                            </strong>
-
-                        </div>
-
-
-                        <div class="report-field">
-
-                            <span>
-                                Country of Registration
-                            </span>
-
-                            <strong>
-                                <?= displayValue(
-                                    $internationalDetails[
-                                        'country_of_origin'
-                                    ]
-                                ) ?>
-                            </strong>
-
-                        </div>
-
-
-                        <div class="report-field">
-
-                            <span>
-                                PBO / Charity Registration Number
-                            </span>
-
-                            <strong>
-                                <?= displayValue(
-                                    $internationalDetails[
-                                        'registration_number'
-                                    ]
-                                ) ?>
-                            </strong>
-
-                        </div>
-
-
-                        <div class="report-field">
-
-                            <span>
-                                Parent Physical Address
-                            </span>
-
-                            <strong>
-                                <?= displayValue(
-                                    $internationalDetails[
-                                        'parent_physical_address'
-                                    ]
-                                ) ?>
-                            </strong>
-
-                        </div>
-
-
-                        <div class="report-field">
-
-                            <span>
-                                Parent Postal Address
-                            </span>
-
-                            <strong>
-                                <?= displayValue(
-                                    $internationalDetails[
-                                        'parent_postal_address'
-                                    ]
-                                ) ?>
-                            </strong>
-
-                        </div>
-
-
-                        <div class="report-field">
-
-                            <span>
-                                Parent Postal Code
-                            </span>
-
-                            <strong>
-                                <?= displayValue(
-                                    $internationalDetails[
-                                        'parent_postal_code'
-                                    ]
-                                ) ?>
-                            </strong>
-
-                        </div>
-
-
-                        <div class="report-field">
-
-                            <span>
-                                Parent Phone
-                            </span>
-
-                            <strong>
-                                <?= displayValue(
-                                    $internationalDetails[
-                                        'parent_phone_number'
-                                    ]
-                                ) ?>
-                            </strong>
-
-                        </div>
-
-
-                        <div class="report-field">
-
-                            <span>
-                                Parent Email
-                            </span>
-
-                            <strong>
-                                <?= displayValue(
-                                    $internationalDetails[
-                                        'parent_email'
-                                    ]
-                                ) ?>
-                            </strong>
-
-                        </div>
-
-
-                        <div class="report-field">
-
-                            <span>
-                                Contact Person
-                            </span>
-
-                            <strong>
-                                <?= displayValue(
-                                    $internationalDetails[
-                                        'contact_person_name'
-                                    ]
-                                ) ?>
-                            </strong>
-
-                        </div>
-
-
-                        <div class="report-field">
-
-                            <span>
-                                Contact Person Phone
-                            </span>
-
-                            <strong>
-                                <?= displayValue(
-                                    $internationalDetails[
-                                        'contact_person_phone'
-                                    ]
-                                ) ?>
-                            </strong>
-
-                        </div>
-
-
-                        <div class="report-field">
-
-                            <span>
-                                Contact Person Email
-                            </span>
-
-                            <strong>
-                                <?= displayValue(
-                                    $internationalDetails[
-                                        'contact_person_email'
-                                    ]
-                                ) ?>
-                            </strong>
-
-                        </div>
-
-                    </div>
-
-                </div>
-
-            </section>
-
-        <?php endif; ?>
-
-
-        <!-- ======================================================
-             PUBLIC BENEFIT PURPOSES
-             ====================================================== -->
-
-        <section class="report-section">
-
-            <div class="report-section-header">
-
-                <div class="report-section-number">
-                    <?= $application['registration_type'] ===
-                        'international'
-                        ? '4'
-                        : '3' ?>
-                </div>
-
-                <div>
-
-                    <h2>
-                        Public Benefit Purposes
-                    </h2>
-
-                </div>
-
-            </div>
-
-
-            <div class="report-section-body">
-
-
-                <?php if ($objectives !== []): ?>
-
-                    <div class="report-check-grid">
-
-                        <?php foreach (
-                            $objectives
-                            as $objective
-                        ): ?>
-
-                            <?php
-
-                            $objectiveCode =
-                                (string)
-                                $objective[
-                                    'objective_code'
-                                ];
-
-
-                            $objectiveLabel =
-                                $objectiveLabels[
-                                    $objectiveCode
-                                ]
-                                ??
-                                ucwords(
-                                    strtolower(
-                                        str_replace(
-                                            '_',
-                                            ' ',
-                                            $objectiveCode
-                                        )
-                                    )
-                                );
-
-                            ?>
-
-
-                            <div class="report-check">
-
-                                <span class="report-check-mark">
-                                    &#10003;
-                                </span>
-
-                                <span>
-                                    <?= e(
-                                        $objectiveLabel
-                                    ) ?>
-                                </span>
-
-                            </div>
-
-                        <?php endforeach; ?>
-
-                    </div>
-
-
-                    <?php foreach (
-                        $objectives
-                        as $objective
-                    ): ?>
-
-                        <?php if (
-                            $objective[
-                                'objective_code'
-                            ] === 'OTHER'
-                        ): ?>
-
-                            <div class="report-description">
-
-                                <span>
-                                    Any Other — Description
-                                </span>
-
-                                <p>
-                                    <?= displayValue(
-                                        $objective[
-                                            'description'                                    ]
-                                ) ?>
-                            </p>
-
-                        </div>
-
-                    <?php endif; ?>
-
-                <?php endforeach; ?>
-
-
-            <?php else: ?>
-
-                <p class="text-muted">
-                    No public benefit purposes recorded.
-                </p>
-
-            <?php endif; ?>
-
-        </div>
-
-    </section>
-
-
-    <!-- ======================================================
-         BENEFICIARIES
-         ====================================================== -->
-
-    <section class="report-section">
-
-        <div class="report-section-header">
-
-            <div class="report-section-number">
-                <?= $application['registration_type'] ===
-                    'international'
-                    ? '5'
-                    : '4' ?>
-            </div>
-
-            <div>
-
-                <h2>
-                    Beneficiaries
-                </h2>
-
-            </div>
-
-        </div>
-
-
-        <div class="report-section-body">
-
-            <?php if ($beneficiaries !== []): ?>
-
-
-                <?php
-
-                $isPublic = false;
-
-                foreach (
-                    $beneficiaries
-                    as $beneficiary
-                ) {
-
-                    if (
-                        $beneficiary[
-                            'beneficiary_code'
-                        ] === 'PUBLIC'
-                    ) {
-
-                        $isPublic = true;
-
-                        break;
-                    }
-                }
-
-                ?>
-
-
-                <?php if ($isPublic): ?>
-
-                    <div
-                        style="
-                            padding: 17px 19px;
-                            background:
-                                linear-gradient(
-                                    100deg,
-                                    var(--blue-light),
-                                    #ffffff
-                                );
-                            border: 1px solid #d2e0ec;
-                            border-left: 4px solid var(--blue);
-                            border-radius: var(--radius);
-                        "
-                    >
-
-                        <span
-                            style="
-                                display: block;
-                                margin-bottom: 4px;
-                                color: var(--text-muted);
-                                font-size: 9px;
-                                font-weight: 800;
-                                letter-spacing: .5px;
-                                text-transform: uppercase;
-                            "
-                        >
-                            Beneficiary Category
-                        </span>
-
-                        <strong
-                            style="
-                                color: var(--blue-dark);
-                                font-size: 16px;
-                            "
-                        >
-                            Public
-                        </strong>
-
-                    </div>
-
-
-                <?php else: ?>
-
-                    <div
-                        style="
-                            margin-bottom: 15px;
-                        "
-                    >
-
-                        <span
-                            style="
-                                display: block;
-                                margin-bottom: 4px;
-                                color: var(--text-muted);
-                                font-size: 9px;
-                                font-weight: 800;
-                                letter-spacing: .5px;
-                                text-transform: uppercase;
-                            "
-                        >
-                            Beneficiary Category
-                        </span>
-
-                        <strong
-                            style="
-                                color: var(--blue-dark);
-                            "
-                        >
-                            Section of the Public
-                        </strong>
-
-                    </div>
-
-
-                    <div class="report-check-grid">
-
-                        <?php foreach (
-                            $beneficiaries
-                            as $beneficiary
-                        ): ?>
-
-                            <?php
-
-                            $beneficiaryCode =
-                                (string)
-                                $beneficiary[
-                                    'beneficiary_code'
-                                ];
-
-
-                            if (
-                                $beneficiaryCode ===
-                                'PUBLIC'
-                            ) {
-                                continue;
-                            }
-
-
-                            $beneficiaryLabel =
-                                $beneficiaryLabels[
-                                    $beneficiaryCode
-                                ]
-                                ??
-                                ucwords(
-                                    strtolower(
-                                        str_replace(
-                                            '_',
-                                            ' ',
-                                            $beneficiaryCode
-                                        )
-                                    )
-                                );
-
-                            ?>
-
-
-                            <div class="report-check">
-
-                                <span class="report-check-mark">
-                                    &#10003;
-                                </span>
-
-                                <span>
-                                    <?= e(
-                                        $beneficiaryLabel
-                                    ) ?>
-                                </span>
-
-                            </div>
-
-                        <?php endforeach; ?>
-
-                    </div>
-
-
-                    <!-- ==========================================
-                         OTHER BENEFICIARY
-                         ========================================== -->
-
-                    <?php foreach (
-                        $beneficiaries
-                        as $beneficiary
-                    ): ?>
-
-                        <?php if (
-                            (string)
-                            $beneficiary[
-                                'beneficiary_code'
-                            ] === 'OTHER'
-                        ): ?>
-
-                            <?php
-
-                            $otherSpecify = '';
-
-                            $otherDescription = '';
-
-
-                            $storedOther =
-                                trim(
-                                    (string)
-                                    (
-                                        $beneficiary[
-                                            'description'
-                                        ]
-                                        ?? ''
-                                    )
-                                );
-
-
-                            if ($storedOther !== '') {
-
-                                $decodedOther =
-                                    json_decode(
-                                        $storedOther,
-                                        true
-                                    );
-
-
-                                if (
-                                    is_array(
-                                        $decodedOther
-                                    )
-                                ) {
-
-                                    $otherSpecify =
-                                        trim(
-                                            (string)
-                                            (
-                                                $decodedOther[
-                                                    'specify'
-                                                ]
-                                                ?? ''
-                                            )
-                                        );
-
-
-                                    $otherDescription =
-                                        trim(
-                                            (string)
-                                            (
-                                                $decodedOther[
-                                                    'description'
-                                                ]
-                                                ?? ''
-                                            )
-                                        );
-
-                                } else {
-
-                                    /*
-                                    | Compatibility with older
-                                    | plain-text records.
-                                    */
-
-                                    $otherDescription =
-                                        $storedOther;
-                                }
-                            }
-
-                            ?>
-
-
-                            <div class="report-description">
-
-                                <span>
-                                    Others Not Listed Here
-                                </span>
-
-
-                                <div
-                                    class="report-grid"
-                                    style="margin-top: 10px;"
-                                >
-
-                                    <div class="report-field">
-
-                                        <span>
-                                            Specify
-                                        </span>
-
-                                        <strong>
-                                            <?= displayValue(
-                                                $otherSpecify
-                                            ) ?>
-                                        </strong>
-
-                                    </div>
-
-
-                                    <div class="report-field">
-
-                                        <span>
-                                            Description
-                                        </span>
-
-                                        <strong
-                                            style="
-                                                white-space: pre-wrap;
-                                            "
-                                        >
-                                            <?= displayValue(
-                                                $otherDescription
-                                            ) ?>
-                                        </strong>
-
-                                    </div>
-
-                                </div>
-
-                            </div>
-
-                        <?php endif; ?>
-
-                    <?php endforeach; ?>
-
-                <?php endif; ?>
-
-
-            <?php else: ?>
-
-                <p class="text-muted">
-                    No beneficiary information recorded.
-                </p>
-
-            <?php endif; ?>
-
-        </div>
-
-    </section>
-
-
-    <!-- ======================================================
-         FINANCIAL YEAR
-         ====================================================== -->
-
-    <section class="report-section">
-
-        <div class="report-section-header">
-
-            <div class="report-section-number">
-                <?= $application['registration_type'] ===
-                    'international'
-                    ? '6'
-                    : '5' ?>
-            </div>
-
-            <div>
-
-                <h2>
-                    Financial Year
-                </h2>
-
-            </div>
-
-        </div>
-
-
-        <div class="report-section-body">
-
-
-            <?php if (
-                isset(
-                    $months[$startMonth]
-                ) &&
-                isset(
-                    $months[$endMonth]
-                )
-            ): ?>
-
-                <div class="financial-year-report">
-
-
-                    <div class="financial-year-month">
-
-                        <span>
-                            Financial Year Starts
-                        </span>
-
-                        <strong>
-                            <?= e(
-                                $months[$startMonth]
-                            ) ?>
-                        </strong>
-
-                    </div>
-
-
-                    <div class="financial-year-arrow">
-                        &rarr;
-                    </div>
-
-
-                    <div class="financial-year-month">
-
-                        <span>
-                            Financial Year Ends
-                        </span>
-
-                        <strong>
-                            <?= e(
-                                $months[$endMonth]
-                            ) ?>
-                        </strong>
-
-                    </div>
-
-
-                </div>
-
-
-            <?php else: ?>
-
-                <p class="text-muted">
-                    Financial year information is not available.
-                </p>
-
-            <?php endif; ?>
-
-
-        </div>
-
-    </section>
-
-
-    <!-- ======================================================
-         OFFICIALS AND DIRECTORS
-         ====================================================== -->
-
-    <section class="report-section">
-
-        <div class="report-section-header">
-
-            <div class="report-section-number">
-                <?= $application['registration_type'] ===
-                    'international'
-                    ? '7'
-                    : '6' ?>
-            </div>
-
-            <div>
-
-                <h2>
-                    Officials and Directors
-                </h2>
-
-            </div>
-
-        </div>
-
-
-        <div class="report-section-body">
-
-
-            <?php if ($officials !== []): ?>
-
-                <div
-                    style="
-                        margin-bottom: 16px;
-                        padding: 12px 15px;
-                        background: var(--blue-light);
-                        border: 1px solid #d2e0ec;
-                        border-radius: var(--radius);
-                        color: var(--blue-dark);
-                        font-size: 11px;
-                    "
-                >
-                    Total officials/directors:
-
-                    <strong>
-                        <?= count($officials) ?>
-                    </strong>
-                </div>
-
-
-                <?php foreach (
-                    $officials
-                    as $officialIndex => $official
-                ): ?>
-
-                    <?php
-
-                    $designation =
-                        designationLabel(
-                            (string)
-                            $official[
-                                'designation'
-                            ]
-                        );
-
-
-                    $signature =
-                        trim(
-                            (string)
-                            (
-                                $official[
-                                    'signature'
-                                ]
-                                ?? ''
-                            )
-                        );
-
-
-                    $signatureExt =
-                        $signature !== ''
-                            ? signatureExtension(
-                                $signature
-                            )
-                            : '';
-
-
-                    $imageSignature =
-                        in_array(
-                            $signatureExt,
-                            [
-                                'jpg',
-                                'jpeg',
-                                'png',
-                                'webp',
-                            ],
-                            true
-                        );
-
-
-                    $pdfSignature =
-                        $signatureExt ===
-                        'pdf';
-
-                    ?>
-
-
-                    <article class="official-report-card">
-
-
-                        <!-- ==============================
-                             OFFICIAL HEADER
-                             ============================== -->
-
-                        <div class="official-report-header">
-
-                            <span>
-                                Official / Director
-                            </span>
-
-                            <h3>
-                                <?= e($designation) ?>
-
-                                <?php if (
-                                    strtoupper(
-                                        (string)
-                                        $official[
-                                            'designation'
-                                        ]
-                                    ) ===
-                                    'DIRECTOR'
-                                ): ?>
-
-                                    <?= ' ' .
-                                        (
-                                            $officialIndex -
-                                            2
-                                        ) ?>
-
-                                <?php endif; ?>
-
-                            </h3>
-
-                        </div>
-
-
-                        <!-- ==============================
-                             OFFICIAL BODY
-                             ============================== -->
-
-                        <div class="official-report-body">
-
-                            <div class="report-grid">
-
-
-                                <div class="report-field">
-
-                                    <span>
-                                        Name
-                                    </span>
-
-                                    <strong>
-                                        <?= displayValue(
-                                            $official[
-                                                'full_name'
-                                            ]
-                                        ) ?>
-                                    </strong>
-
-                                </div>
-
-
-                                <div class="report-field">
-
-                                    <span>
-                                        Nationality
-                                    </span>
-
-                                    <strong>
-                                        <?= displayValue(
-                                            $official[
-                                                'nationality'
-                                            ]
-                                        ) ?>
-                                    </strong>
-
-                                </div>
-
-
-                                <div class="report-field">
-
-                                    <span>
-                                        ID / Passport Number
-                                    </span>
-
-                                    <strong>
-                                        <?= displayValue(
-                                            $official[
-                                                'id_passport_number'
-                                            ]
-                                        ) ?>
-                                    </strong>
-
-                                </div>
-
-
-                                <div class="report-field">
-
-                                    <span>
-                                        KRA PIN
-                                    </span>
-
-                                    <strong>
-                                        <?= displayValue(
-                                            $official[
-                                                'kra_pin'
-                                            ]
-                                        ) ?>
-                                    </strong>
-
-                                </div>
-
-
-                                <div class="report-field">
-
-                                    <span>
-                                        Phone Number
-                                    </span>
-
-                                    <strong>
-                                        <?= displayValue(
-                                            $official[
-                                                'phone_number'
-                                            ]
-                                        ) ?>
-                                    </strong>
-
-                                </div>
-
-
-                                <div class="report-field">
-
-                                    <span>
-                                        Email
-                                    </span>
-
-                                    <strong>
-                                        <?= displayValue(
-                                            $official[
-                                                'email'
-                                            ]
-                                        ) ?>
-                                    </strong>
-
-                                </div>
-
-                            </div>
-
-
-                            <!-- ==============================
-                                 SIGNATURE
-                                 ============================== -->
-
-                            <div class="signature-panel">
-
-                                <span class="signature-panel-label">
-                                    Signature
-                                </span>
-
-
-                                <?php if (
-                                    $signature === ''
-                                ): ?>
-
-                                    <div class="signature-preview">
-
-                                        <span class="signature-missing">
-                                            Signature not available
-                                        </span>
-
-                                    </div>
-
-
-                                <?php elseif (
-                                    $imageSignature
-                                ): ?>
-
-                                    <div class="signature-preview">
-
-                                        <img
-                                            src="<?= e(
-                                                $signature
-                                            ) ?>"
-                                            alt="<?= e(
-                                                (string)
-                                                $official[
-                                                    'full_name'
-                                                ]
-                                            ) ?> signature"
-                                            loading="lazy"
-                                        >
-
-                                    </div>
-
-
-                                <?php elseif (
-                                    $pdfSignature
-                                ): ?>
-
-                                    <div class="signature-preview">
-
-                                        <div class="signature-pdf">
-
-
-                                            <div class="signature-pdf-details">
-
-                                                <strong>
-                                                    Signature Document
-                                                </strong>
-
-                                                <span>
-                                                    PDF signature file
-                                                </span>
-
-                                            </div>
-
-
-                                            <a
-                                                href="<?= e(
-                                                    $signature
-                                                ) ?>"
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                class="btn btn-secondary btn-sm no-print"
-                                            >
-                                                View PDF
-                                            </a>
-
-
-                                            <span
-                                                class="print-only"
-                                                style="
-                                                    display: none;
-                                                "
-                                            >
-                                                PDF signature document attached
-                                            </span>
-
-                                        </div>
-
-                                    </div>
-
-
-                                <?php else: ?>
-
-                                    <div class="signature-preview">
-
-                                        <div class="signature-pdf">
-
-                                            <div class="signature-pdf-details">
-
-                                                <strong>
-                                                    Signature File
-                                                </strong>
-
-                                                <span>
-                                                    Stored signature document
-                                                </span>
-
-                                            </div>
-
-
-                                            <a
-                                                href="<?= e(
-                                                    $signature
-                                                ) ?>"
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                class="btn btn-secondary btn-sm no-print"
-                                            >
-                                                Open File
-                                            </a>
-
-                                        </div>
-
-                                    </div>
-
-                                <?php endif; ?>
-
-                            </div>
-
-                        </div>
-
-                    </article>
-
-                <?php endforeach; ?>
-
-
-            <?php else: ?>
-
-                <p class="text-muted">
-                    No officials or directors are recorded.
-                </p>
-
-            <?php endif; ?>
-
-        </div>
-
-    </section>
-
-
-    <!-- ======================================================
-         RECORD INFORMATION
-         ====================================================== -->
-
-    <section class="report-document-footer">
-
-        <div class="report-document-footer-grid">
-
-
-            <div>
-
-                <span>
-                    Application Reference
-                </span>
-
-                <strong>
-                    <?= displayValue(
-                        $application[
-                            'application_reference'
-                        ]
-                    ) ?>
-                </strong>
-
-            </div>
-
-
-            <div>
-
-                <span>
-                    Record Status
-                </span>
-
-                <strong>
-                    Submitted
-                </strong>
-
-            </div>
-
-
-            <div>
-
-                <span>
-                    Submitted Date
-                </span>
-
-                <strong>
-                    <?= $submittedDate !== ''
-                        ? e($submittedDate)
-                        : 'Not available' ?>
-                </strong>
-
-            </div>
-
-
-            <div>
-
-                <span>
-                    Organization
-                </span>
-
-                <strong>
-                    <?= displayValue(
-                        $application[
-                            'pbo_name'
-                        ]
-                    ) ?>
-                </strong>
-
-            </div>
-
-        </div>
-
 
         <div
+            class="record-toolbar no-print"
             style="
-                margin-top: 16px;
-                padding-top: 13px;
-                border-top: 1px solid var(--border);
-                color: var(--text-muted);
-                font-size: 10px;
-                line-height: 1.6;
+                margin-top: 20px;
+                margin-bottom: 0;
             "
         >
-            This page presents the information recorded in the
-            PBO Registration System for this submitted application.
+
+            <a
+                href="/pbo-portal/applications/records.php"
+                class="btn btn-secondary"
+            >
+                &larr; Back to Records
+            </a>
+
+
+            <div class="record-toolbar-actions">
+
+                <a
+                    href="/pbo-portal/admin/verify-edit.php?id=<?= (int) $applicationId ?>"
+                    class="btn btn-warning"
+                >
+                    Edit Submitted Record
+                </a>
+
+                <a
+                    href="/pbo-portal/applications/export-excel.php?id=<?= (int) $applicationId ?>"
+                    class="btn btn-success"
+                >
+                    Export Excel
+                </a>
+
+                <button
+                    type="button"
+                    class="btn btn-primary"
+                    onclick="window.print();"
+                >
+                    Print / Save PDF
+                </button>
+
+            </div>
+
         </div>
 
-    </section>
-
-
-    <!-- ======================================================
-         BOTTOM ACTIONS
-         ====================================================== -->
-
-    <div
-        class="report-toolbar no-print"
-        style="
-            margin-top: 20px;
-            margin-bottom: 0;
-        "
-    >
-
-        <a
-            href="/pbo-portal/applications/records.php"
-            class="btn btn-secondary"
-        >
-            &larr; Back to Records
-        </a>
-
-
-        <button
-            type="button"
-            class="btn btn-primary"
-            onclick="window.print();"
-        >
-            Print / Save PDF
-        </button>
-
     </div>
-
-
-</div>
-<!-- END .application-report -->
+    <!-- END .pbo-record -->
 
 </div>
 <!-- END .applications-page -->

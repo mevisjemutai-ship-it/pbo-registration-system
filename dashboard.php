@@ -302,7 +302,78 @@ unset(
 | Load shared navigation/header
 |--------------------------------------------------------------------------
 */
+/*
+|--------------------------------------------------------------------------
+| Recent Applications
+|--------------------------------------------------------------------------
+|
+| Submitted applications are visible to all authenticated staff.
+|
+| Draft applications are private to the staff member who created them.
+|
+| The most recently submitted/updated records appear first.
+|
+*/
 
+$statement =
+    $connection->prepare(
+        "
+        SELECT
+            id,
+            application_reference,
+            pbo_name,
+            registration_type,
+            status,
+            current_step,
+            created_by,
+            created_at,
+            updated_at,
+            submitted_at
+
+        FROM pbo_applications
+
+        WHERE
+            status = 'submitted'
+
+            OR
+
+            (
+                status = 'draft'
+                AND created_by = :user_id
+            )
+
+        ORDER BY
+            CASE
+                WHEN status = 'submitted'
+                    THEN COALESCE(
+                        submitted_at,
+                        updated_at,
+                        created_at
+                    )
+
+                ELSE COALESCE(
+                    updated_at,
+                    created_at
+                )
+            END DESC,
+            id DESC
+
+        LIMIT 6
+        "
+    );
+
+
+$statement->execute([
+
+    ':user_id'
+        => $userId,
+]);
+
+
+$recentApplications =
+    $statement->fetchAll(
+        PDO::FETCH_ASSOC
+    );
 require_once __DIR__ . '/includes/header.php';
 
 ?>
@@ -894,35 +965,6 @@ require_once __DIR__ . '/includes/header.php';
 
                 </div>
 
-            </a>
-
-
-            <!-- SEARCH -->
-
-            <a
-                href="/pbo-portal/applications/search.php"
-                class="quick-card quick-card-red"
-            >
-
-                <div class="quick-card-icon">
-                    S
-                </div>
-
-
-                <div>
-
-                    <strong>
-                        Search Organizations
-                    </strong>
-
-                    <span>
-                        Find application and organization records
-                    </span>
-
-                </div>
-
-            </a>
-
 
             <!-- RECORDS -->
 
@@ -987,15 +1029,6 @@ require_once __DIR__ . '/includes/header.php';
 
             </div>
 
-
-            <a
-                href="/pbo-portal/applications/search.php"
-                class="btn btn-secondary btn-sm"
-            >
-                View All
-            </a>
-
-        </div>
 
 
         <div class="dashboard-recent-list">

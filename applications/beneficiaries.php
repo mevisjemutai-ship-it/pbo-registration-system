@@ -412,6 +412,39 @@ $errors = [];
 */
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        /*
+    |--------------------------------------------------------------------------
+    | Submission action
+    |--------------------------------------------------------------------------
+    */
+
+    $formAction =
+        (string)
+        ($_POST['form_action'] ?? 'save_continue');
+
+
+    $isWizardNavigation =
+        $formAction ===
+        'wizard_navigation';
+
+
+    $wizardDestination =
+        filter_input(
+            INPUT_POST,
+            'wizard_destination',
+            FILTER_VALIDATE_INT
+        );
+
+
+    if (
+        $wizardDestination === false ||
+        $wizardDestination === null ||
+        $wizardDestination < 1 ||
+        $wizardDestination > 6
+    ) {
+
+        $wizardDestination = 3;
+    }
 
 
     /*
@@ -453,21 +486,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 
     if (
-        !in_array(
-            $beneficiaryScope,
-            [
-                'public',
-                'section_of_public',
-            ],
-            true
-        )
-    ) {
+    !$isWizardNavigation &&
+    !in_array(
+        $beneficiaryScope,
+        [
+            'public',
+            'section_of_public',
+        ],
+        true
+    )
+) {
 
-        $errors[] =
-            'Please indicate whether the beneficiaries are the Public or a Section of the Public.';
-
-    }
-
+    $errors[] =
+        'Please indicate whether the beneficiaries are the Public or a Section of the Public.';
+}
 
     /*
     |--------------------------------------------------------------------------
@@ -543,9 +575,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     */
 
     if (
-        $beneficiaryScope ===
-        'section_of_public'
-    ) {
+    !$isWizardNavigation &&
+    $beneficiaryScope ===
+    'section_of_public'
+) {
 
         if ($selectedBeneficiaries === []) {
 
@@ -687,7 +720,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         => $applicationId,
                 ]);
 
-            } else {
+                } elseif (
+    $beneficiaryScope ===
+    'section_of_public'
+) {
+
+        
 
 
                 /*
@@ -857,21 +895,72 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $connection->commit();
 
 
+
+
             /*
             |--------------------------------------------------------------------------
             | Continue
             |--------------------------------------------------------------------------
             */
 
-            header(
-                'Location: /pbo-portal/applications/financial-year.php?id=' .
-                urlencode(
-                    (string)
-                    $applicationId
-                )
-            );
+            /*
+|--------------------------------------------------------------------------
+| Destination after save
+|--------------------------------------------------------------------------
+*/
 
-            exit;
+if ($isWizardNavigation) {
+
+    $wizardPages = [
+
+        1 => 'create.php',
+
+        2 => 'objectives.php',
+
+        3 => 'beneficiaries.php',
+
+        4 => 'financial-year.php',
+
+        5 => 'officials.php',
+
+        6 => 'review.php',
+    ];
+
+
+    $destinationPage =
+        $wizardPages[$wizardDestination]
+        ?? 'beneficiaries.php';
+
+
+    header(
+        'Location: /pbo-portal/applications/' .
+        $destinationPage .
+        '?id=' .
+        urlencode(
+            (string)
+            $applicationId
+        )
+    );
+
+    exit;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Normal Save & Continue
+|--------------------------------------------------------------------------
+*/
+
+header(
+    'Location: /pbo-portal/applications/financial-year.php?id=' .
+    urlencode(
+        (string)
+        $applicationId
+    )
+);
+
+exit;
 
         } catch (Throwable $exception) {
 
@@ -974,88 +1063,14 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
 
 
-    <!-- ==========================================================
-         PROGRESS
-         ========================================================== -->
+    <?php
 
-    <div
-        style="
-            margin-bottom: 22px;
-            padding: 16px 18px;
-            background: #ffffff;
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            box-shadow: var(--shadow-sm);
-        "
-    >
+$wizardCurrentStep = 3;
 
-        <div
-            style="
-                display: flex;
-                justify-content: space-between;
-                gap: 10px;
-                margin-bottom: 10px;
-                color: var(--text-secondary);
-                font-size: 11px;
-                font-weight: 700;
-            "
-        >
+require __DIR__ .
+    '/../includes/application-wizard.php';
 
-            <span>
-                1. Organization
-            </span>
-
-            <span>
-                2. Objectives
-            </span>
-
-            <span style="color: var(--blue);">
-                3. Beneficiaries
-            </span>
-
-            <span>
-                4. Financial Year
-            </span>
-
-            <span>
-                5. Officials
-            </span>
-
-            <span>
-                6. Review
-            </span>
-
-        </div>
-
-
-        <div
-            style="
-                width: 100%;
-                height: 7px;
-                overflow: hidden;
-                background: #e9edf1;
-                border-radius: 20px;
-            "
-        >
-
-            <div
-                style="
-                    width: 50%;
-                    height: 100%;
-                    background:
-                        linear-gradient(
-                            90deg,
-                            var(--blue),
-                            var(--blue-medium)
-                        );
-                "
-            ></div>
-
-        </div>
-
-    </div>
-
-
+?>
     <!-- ==========================================================
          ERRORS
          ========================================================== -->
@@ -1113,6 +1128,20 @@ require_once __DIR__ . '/../includes/header.php';
             name="application_id"
             value="<?= (int) $applicationId ?>"
         >
+
+        <input
+    type="hidden"
+    name="form_action"
+    id="form_action"
+    value="save_continue"
+>
+
+<input
+    type="hidden"
+    name="wizard_destination"
+    id="wizard_destination"
+    value=""
+>
 
 
         <!-- ======================================================
@@ -1790,6 +1819,90 @@ require_once __DIR__ . '/../includes/header.php';
 
             }
 
+        }
+    );
+
+        /*
+    |--------------------------------------------------------------------------
+    | Wizard navigation
+    |--------------------------------------------------------------------------
+    */
+
+    const wizardLinks =
+        document.querySelectorAll(
+            '[data-wizard-link="true"]'
+        );
+
+
+    wizardLinks.forEach(
+        function (link) {
+
+            link.addEventListener(
+                'click',
+                function (event) {
+
+                    const destination =
+                        this.getAttribute(
+                            'data-wizard-step'
+                        );
+
+
+                    /*
+                    | Beneficiaries is the current page.
+                    */
+
+                    if (destination === '3') {
+
+                        return;
+                    }
+
+
+                    event.preventDefault();
+
+
+                    const formAction =
+                        document.getElementById(
+                            'form_action'
+                        );
+
+                    const wizardDestination =
+                        document.getElementById(
+                            'wizard_destination'
+                        );
+
+
+                    if (
+                        !formAction ||
+                        !wizardDestination
+                    ) {
+
+                        return;
+                    }
+
+
+                    formAction.value =
+                        'wizard_navigation';
+
+                    wizardDestination.value =
+                        destination;
+
+
+                    /*
+                    | Synchronize the conditional controls before POST.
+                    */
+
+                    updateBeneficiaryScope();
+
+
+                    /*
+                    | Skip normal Save & Continue validation.
+                    */
+
+                    form.noValidate = true;
+
+                    form.submit();
+                }
+            );
         }
     );
 
