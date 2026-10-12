@@ -1,0 +1,368 @@
+/* ============================================================
+   PBORA BRAND: header, footer and sign-in pages
+   Add to the END of assets/css/style.css
+   (remove any earlier "PBORA LOGO HEADER" block first)
+   ============================================================ */
+
+:root {
+    --pbora-blue: #2e4a9c;
+    --pbora-blue-dark: #233a7d;
+    --pbora-gold: #c0952f;
+    --pbora-red: #c8202f;
+}
+
+
+/* ------------------------------------------------------------
+   Header: logo and navigation share one white bar
+   ------------------------------------------------------------ */
+
+.top-navigation {
+    min-height: 84px;
+    background: var(--white);
+    border-bottom: 1px solid #e3e7ee;
+    box-shadow: 0 6px 18px rgba(20, 35, 70, .06);
+}
+
+.top-navigation::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(
+        90deg,
+        var(--pbora-red) 0 33.33%,
+        var(--pbora-gold) 33.33% 66.66%,
+        var(--pbora-blue) 66.66% 100%
+    );
+}
+
+.top-navigation-inner {
+    min-height: 84px;
+    align-items: center;
+    gap: 6px;
+    padding: 0 34px;
+}
+
+.nav-brand {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    margin-right: 26px;
+}
+
+.nav-brand img {
+    display: block;
+    width: auto;
+    height: 60px;
+}
+
+.top-nav-dropdown {
+    align-self: stretch;
+    align-items: center;
+}
+
+.top-nav-link {
+    min-height: 44px;
+    padding: 0 13px;
+    border-radius: 6px;
+    color: var(--pbora-blue);
+    font-size: 14px;
+    font-weight: 650;
+}
+
+.top-nav-link:hover {
+    background: #eef2fb;
+    color: var(--pbora-blue-dark);
+}
+
+.top-nav-active {
+    background: transparent;
+    color: var(--pbora-blue-dark);
+}
+
+.top-nav-active::after {
+    left: 13px;
+    right: 13px;
+    bottom: -4px;
+    height: 3px;
+    background: var(--pbora-gold);
+    border-radius: 3px;
+}
+
+.top-nav-account {
+    align-self: stretch;
+    border-left: 1px solid #e3e7ee;
+}
+
+.account-button {
+    color: var(--text);
+}
+
+.account-button:hover {
+    background: #f3f5fa;
+}
+
+.account-button-avatar {
+    background: var(--pbora-blue);
+    color: var(--white);
+}
+
+.account-button-copy strong {
+    color: var(--heading);
+    font-size: 12px;
+}
+
+.account-button-copy small {
+    color: var(--text-muted);
+    font-size: 10px;
+}
+
+
+/* ------------------------------------------------------------
+   Footer (after www.pbora.go.ke)
+   ------------------------------------------------------------ */
+
+.top-layout-footer {
+    display: none;
+}
+
+.pbora-footer {
+    margin-top: 40px;
+    background: var(--pbora-blue);
+    color: rgba(255, 255, 255, .9);
+    font-size: 13px;
+}
+
+.pbora-footer-inner {
+    display: grid;
+    grid-template-columns: 1.1fr .9fr 1.3fr;
+    gap: 40px;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 34px 34px 30px;
+}
+
+.pbora-footer-logo {
+    display: inline-flex;
+    padding: 10px 14px;
+    background: var(--white);
+    border-radius: 8px;
+}
+
+.pbora-footer-logo img {
+    display: block;
+    width: auto;
+    height: 48px;
+}
+
+.pbora-footer-about p {
+    max-width: 330px;
+    margin: 14px 0 0;
+    line-height: 1.6;
+}
+
+.pbora-footer-column h2 {
+    display: inline-block;
+    margin: 0 0 14px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #4f7be8;
+    color: var(--white);
+    font-size: 17px;
+    font-weight: 700;
+}
+
+.pbora-footer-links,
+.pbora-footer-contact {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.pbora-footer-links li {
+    border-bottom: 1px solid rgba(255, 255, 255, .14);
+}
+
+.pbora-footer-links a {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 0;
+    color: var(--white);
+    text-decoration: none;
+}
+
+.pbora-footer-links a::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    flex-shrink: 0;
+    border: 2px solid var(--pbora-gold);
+    border-radius: 50%;
+}
+
+.pbora-footer-links a:hover,
+.pbora-footer-contact a:hover {
+    color: #ffe7a8;
+    text-decoration: underline;
+}
+
+.pbora-footer-contact li {
+    display: flex;
+    align-items: flex-start;
+    gap: 11px;
+    padding: 6px 0;
+    line-height: 1.55;
+}
+
+.pbora-footer-contact svg {
+    width: 17px;
+    height: 17px;
+    flex-shrink: 0;
+    margin-top: 2px;
+    fill: var(--pbora-gold);
+}
+
+.pbora-footer-contact a {
+    color: var(--white);
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.pbora-footer-copyright {
+    padding: 14px 34px;
+    background: var(--pbora-gold);
+    color: var(--white);
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+}
+
+
+/* ------------------------------------------------------------
+   Sign-in pages: logo, live background, copyright
+   ------------------------------------------------------------ */
+
+.login-body::before {
+    z-index: 2;
+    background: linear-gradient(
+        90deg,
+        var(--pbora-red) 0 33.33%,
+        var(--pbora-gold) 33.33% 66.66%,
+        var(--pbora-blue) 66.66% 100%
+    );
+}
+
+.login-network {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    width: 100%;
+    height: 100%;
+}
+
+.login-card {
+    z-index: 1;
+    backdrop-filter: blur(2px);
+}
+
+.login-logo {
+    display: block;
+    width: 100%;
+    max-width: 250px;
+    height: auto;
+    margin: 0 auto 18px;
+}
+
+.login-copyright {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1;
+    padding: 10px 16px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    text-align: center;
+    pointer-events: none;
+}
+
+
+/* ------------------------------------------------------------
+   Smaller screens
+   ------------------------------------------------------------ */
+
+@media (max-width: 1100px) {
+    .nav-brand {
+        margin-right: 10px;
+    }
+
+    .nav-brand img {
+        height: 50px;
+    }
+
+    .top-nav-link {
+        padding: 0 10px;
+        font-size: 13px;
+    }
+
+    .pbora-footer-inner {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .pbora-footer-about {
+        grid-column: 1 / -1;
+    }
+}
+
+@media (max-width: 700px) {
+    .top-navigation,
+    .top-navigation-inner {
+        min-height: 64px;
+    }
+
+    .top-navigation-inner {
+        padding: 0 8px;
+    }
+
+    .nav-brand img {
+        height: 40px;
+    }
+
+    .top-nav-link {
+        min-height: 40px;
+        font-size: 12px;
+    }
+
+    .top-nav-menu {
+        top: 70px;
+    }
+
+    .pbora-footer-inner {
+        grid-template-columns: 1fr;
+        gap: 26px;
+        padding: 28px 18px 24px;
+    }
+
+    .pbora-footer-copyright {
+        padding: 12px 18px;
+        font-size: 12px;
+    }
+
+    .login-body {
+        flex-direction: column;
+    }
+
+    .login-copyright {
+        position: static;
+        margin-top: 18px;
+    }
+}
+
+@media print {
+    .pbora-footer,
+    .login-network {
+        display: none !important;
+    }
+}

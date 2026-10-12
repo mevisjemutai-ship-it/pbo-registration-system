@@ -1,0 +1,58 @@
+/* ============================================================
+   Admin sign-in code page (add to the end of assets/css/style.css)
+   ============================================================ */
+
+.trust-device {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+
+    margin: -4px 0 20px;
+
+    color: var(--text);
+
+    font-size: 13px;
+
+    cursor: pointer;
+}
+
+
+.trust-device input {
+    width: 16px;
+    height: 16px;
+
+    margin-top: 2px;
+
+    flex: 0 0 auto;
+}
+
+
+.trust-device small {
+    display: block;
+
+    margin-top: 2px;
+
+    color: var(--text-muted);
+
+    font-size: 12px;
+}
+
+
+.link-button {
+    padding: 0;
+
+    background: none;
+    border: 0;
+
+    color: var(--blue);
+
+    font-size: inherit;
+    font-weight: 650;
+
+    cursor: pointer;
+}
+
+
+.link-button:hover {
+    text-decoration: underline;
+}

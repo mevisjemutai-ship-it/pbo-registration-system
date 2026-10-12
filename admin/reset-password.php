@@ -4,14 +4,40 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/password-policy.php';
 
 requireAdmin();
 requirePasswordChanged();
 
 
-$userId = filter_input(
-    INPUT_GET,
-    'id',
+/*
+|--------------------------------------------------------------------------
+| Only accept the Reset Password button (POST + security token)
+|--------------------------------------------------------------------------
+|
+| Resetting from a plain link would let another website trick a
+| signed-in administrator into resetting someone's password.
+|
+*/
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+
+    $_SESSION['flash_message'] =
+        'Use the Reset Password button on the User Management page.';
+
+    $_SESSION['flash_type'] =
+        'error';
+
+    header('Location: users.php');
+
+    exit;
+}
+
+verifyCsrfToken($_POST['csrf_token'] ?? null);
+
+
+$userId = filter_var(
+    $_POST['user_id'] ?? null,
     FILTER_VALIDATE_INT
 );
 
@@ -86,10 +112,15 @@ if (!$user) {
 
 /*
 |--------------------------------------------------------------------------
-| Reset password
+| Reset password to the standard temporary password
 |--------------------------------------------------------------------------
+|
+| The temporary password (field.123) is defined once in
+| includes/password-policy.php. The user must replace it at next login.
+|
 */
 
+$temporaryPassword = PBO_TEMPORARY_PASSWORD;
 
 $passwordHash = password_hash(
     $temporaryPassword,
@@ -104,10 +135,7 @@ $stmt = $pdo->prepare(
         must_change_password = TRUE
      WHERE id = :id'
 );
-$temporaryPassword =
-    bin2hex(
-        random_bytes(6)
-    );
+
 $stmt->execute([
     'password_hash' => $passwordHash,
     'id' => $userId
@@ -117,8 +145,9 @@ $stmt->execute([
 $_SESSION['flash_message'] =
     'Password for '
     . $user['full_name']
-    . ' has been reset to field.123. '
-    . 'The user must change it at the next login.';
+    . ' has been reset to '
+    . $temporaryPassword
+    . '. The user must change it at the next login.';
 
 $_SESSION['flash_type'] =
     'success';

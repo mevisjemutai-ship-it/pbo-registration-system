@@ -76,6 +76,20 @@ function cleanString(mixed $value): string
 }
 
 
+/*
+| KRA PINs are stored in one consistent form: uppercase, no spaces.
+*/
+function cleanKraPin(mixed $value): string
+{
+    return strtoupper(
+        preg_replace('/\s+/', '', (string) $value) ?? ''
+    );
+}
+
+
+const MAX_DIRECTORS = 5;
+
+
 function emptyOfficial(string $designation): array
 {
     return [
@@ -532,7 +546,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ),
 
             'kra_pin' =>
-                cleanString(
+                cleanKraPin(
                     $posted['kra_pin'] ?? ''
                 ),
 
@@ -607,7 +621,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ),
 
             'kra_pin' =>
-                cleanString(
+                cleanKraPin(
                     $posted['kra_pin'] ?? ''
                 ),
 
@@ -636,7 +650,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         | Ignore completely blank Director cards.
         */
 
-        if (directorHasData($record)) {
+        if (
+            directorHasData($record) &&
+            count($submittedDirectors) < MAX_DIRECTORS
+        ) {
             $submittedDirectors[] =
                 $record;
         }
@@ -962,7 +979,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (
                 $temporaryFile === '' ||
-                !                !is_uploaded_file(
+                !is_uploaded_file(
                     $temporaryFile
                 )
             ) {
@@ -1954,6 +1971,7 @@ require_once __DIR__ .
         enctype="multipart/form-data"
         class="application-form"
         id="officials-form"
+        autocomplete="off"
     >
 
         <input
@@ -2165,6 +2183,9 @@ require_once __DIR__ .
                         <input
                             type="text"
                             name="officials[<?= e($formKey) ?>][id_passport_number]"
+                        autocomplete="off"
+                        autocapitalize="characters"
+                        spellcheck="false"
                             maxlength="100"
                             value="<?= e(
                                 $record[
@@ -2191,6 +2212,9 @@ require_once __DIR__ .
                         <input
                             type="text"
                             name="officials[<?= e($formKey) ?>][kra_pin]"
+                        autocomplete="off"
+                        autocapitalize="characters"
+                        spellcheck="false"
                             maxlength="50"
                             value="<?= e(
                                 $record[
@@ -2462,8 +2486,8 @@ require_once __DIR__ .
                     class="admin-info"
                     style="margin-bottom: 15px;"
                 >
-                    Directors are optional. Add only those applicable to
-                    this organization. Director signatures are also optional.
+                    Directors are optional. Add up to <?= (int) MAX_DIRECTORS ?> directors,
+                    only where applicable. Director signatures are also optional.
                 </div>
 
 
@@ -2609,6 +2633,9 @@ require_once __DIR__ .
                                         <input
                                             type="text"
                                             name="directors[<?= $index ?>][id_passport_number]"
+                        autocomplete="off"
+                        autocapitalize="characters"
+                        spellcheck="false"
                                             maxlength="100"
                                             value="<?= e(
                                                 $director[
@@ -2617,6 +2644,9 @@ require_once __DIR__ .
                                             ) ?>"
                                             data-director-field
                                             data-field-name="id_passport_number"
+                        autocomplete="off"
+                        autocapitalize="characters"
+                        spellcheck="false"
                                         >
 
                                     </div>
@@ -2635,6 +2665,9 @@ require_once __DIR__ .
                                         <input
                                             type="text"
                                             name="directors[<?= $index ?>][kra_pin]"
+                        autocomplete="off"
+                        autocapitalize="characters"
+                        spellcheck="false"
                                             maxlength="50"
                                             value="<?= e(
                                                 $director[
@@ -2643,6 +2676,9 @@ require_once __DIR__ .
                                             ) ?>"
                                             data-director-field
                                             data-field-name="kra_pin"
+                        autocomplete="off"
+                        autocapitalize="characters"
+                        spellcheck="false"
                                         >
 
                                     </div>
@@ -2959,6 +2995,9 @@ require_once __DIR__ .
                         type="text"
                         data-director-field
                         data-field-name="id_passport_number"
+                        autocomplete="off"
+                        autocapitalize="characters"
+                        spellcheck="false"
                         maxlength="100"
                     >
 
@@ -2979,6 +3018,9 @@ require_once __DIR__ .
                         type="text"
                         data-director-field
                         data-field-name="kra_pin"
+                        autocomplete="off"
+                        autocapitalize="characters"
+                        spellcheck="false"
                         maxlength="50"
                     >
 
@@ -3118,7 +3160,7 @@ require_once __DIR__ .
             'save-officials-button'
         );
 
-    const MAX_DIRECTORS = 30;
+    const MAX_DIRECTORS = <?= (int) MAX_DIRECTORS ?>;
 
 
     /*
@@ -3238,7 +3280,7 @@ require_once __DIR__ .
                           ? ''
                           : 's'
                   ) +
-                  ' added';
+                  ' added (maximum ' + MAX_DIRECTORS + ')';
 
 
         directorSummary.textContent =
@@ -3730,6 +3772,64 @@ require_once __DIR__ .
             );
         }
     );
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Stop browser autofill on every official / director field
+    |--------------------------------------------------------------------------
+    |
+    | Chrome ignores autocomplete="off" and treats the first card (name,
+    | phone, email) as an address form, previewing or filling its own saved
+    | values. A unique, unrecognised autocomplete value per field stops that.
+    |
+    */
+
+    function disableAutofill() {
+
+        form.querySelectorAll(
+            'input[type="text"], input[type="tel"], input[type="email"]'
+        ).forEach(function (field) {
+
+            const key = (field.name || field.dataset.fieldName || 'field')
+                .replace(/[^a-z0-9]+/gi, '-');
+
+            field.setAttribute('autocomplete', 'pbo-' + key);
+        });
+    }
+
+    disableAutofill();
+
+    new MutationObserver(disableAutofill).observe(
+        directorsContainer,
+        { childList: true }
+    );
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | KRA PIN: uppercase as it is typed
+    |--------------------------------------------------------------------------
+    */
+
+    form.addEventListener('input', function (event) {
+
+        const field = event.target;
+
+        if (
+            field instanceof HTMLInputElement &&
+            /\[kra_pin\]$/.test(field.name || '')
+        ) {
+            const start = field.selectionStart;
+            const end = field.selectionEnd;
+
+            field.value = field.value.toUpperCase();
+
+            if (start !== null && end !== null) {
+                field.setSelectionRange(start, end);
+            }
+        }
+    });
 
 
     /*

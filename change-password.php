@@ -6,6 +6,7 @@ session_start();
 
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/password-policy.php';
 
 requireLogin();
 
@@ -14,46 +15,18 @@ $success = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
-    $newPassword = $_POST['new_password'] ?? '';
-    $confirmPassword = $_POST['confirm_password'] ?? '';
+    $newPassword = (string) ($_POST['new_password'] ?? '');
+    $confirmPassword = (string) ($_POST['confirm_password'] ?? '');
 
     /*
      * PASSWORD POLICY
      *
-     * 1. Password must be 6–10 characters.
-     * 2. Password must contain at least one letter.
-     * 3. Password must contain at least one number OR symbol.
-     * 4. Password cannot be the standard temporary password.
-     * 5. Password and confirmation must match.
+     * The rules live in includes/password-policy.php so this page
+     * and reset-password.php always use the same rules.
      */
+    $error = pboPasswordPolicyError($newPassword, $confirmPassword) ?? '';
 
-    if (
-        strlen($newPassword) < 6 ||
-        strlen($newPassword) > 10
-    ) {
-
-        $error = 'Password must be between 6 and 10 characters.';
-
-    } elseif (!preg_match('/[A-Za-z]/', $newPassword)) {
-
-        $error = 'Password must contain at least one letter.';
-
-    } elseif (
-        !preg_match('/[0-9]/', $newPassword) &&
-        !preg_match('/[^A-Za-z0-9]/', $newPassword)
-    ) {
-
-        $error = 'Password must contain at least one number or symbol.';
-
-    } elseif ($newPassword === 'field.123') {
-
-        $error = 'You cannot continue using the temporary password.';
-
-    } elseif ($newPassword !== $confirmPassword) {
-
-        $error = 'The passwords do not match.';
-
-    } else {
+    if ($error === '') {
 
         $passwordHash = password_hash(
             $newPassword,
@@ -120,9 +93,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <div class="login-header">
 
-        <div class="system-mark">
-            PBO
-        </div>
+        <img class="login-logo" src="/pbo-portal/assets/images/pbora-logo.png" alt="Republic of Kenya | Public Benefit Organizations Regulatory Authority (PBORA)" width="539" height="180">
 
         <h1>Change Password</h1>
 
@@ -224,6 +195,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </form>
 
 </div>
+
+<?php require __DIR__ . '/includes/auth-page-extras.php'; ?>
 
 </body>
 

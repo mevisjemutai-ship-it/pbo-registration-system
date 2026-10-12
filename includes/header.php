@@ -77,44 +77,9 @@ foreach (
 
 
 <!-- ==========================================================
-     INSTITUTIONAL HEADER
+     HEADER: PBORA logo + navigation in one white bar
      ========================================================== -->
 
-<header class="portal-brand-header">
-
-    <div class="portal-brand">
-
-        <div class="portal-brand-mark">
-            PBO
-        </div>
-
-
-        <div class="portal-brand-copy">
-
-            <strong>
-                Public Benefit Organizations
-            </strong>
-
-            <span>
-                Registration & Records Management System
-            </span>
-
-        </div>
-
-    </div>
-
-
-    <div class="portal-system-status">
-
-        <span class="system-status-dot"></span>
-
-        <span>
-            Internal System
-        </span>
-
-    </div>
-
-</header>
 
 
 <!-- ==========================================================
@@ -124,6 +89,21 @@ foreach (
 <nav class="top-navigation">
 
     <div class="top-navigation-inner">
+
+
+        <!-- LOGO -->
+
+        <a
+            href="/pbo-portal/dashboard.php"
+            class="nav-brand"
+        >
+            <img
+                src="/pbo-portal/assets/images/pbora-logo.png"
+                alt="Republic of Kenya | Public Benefit Organizations Regulatory Authority (PBORA)"
+                width="539"
+                height="180"
+            >
+        </a>
 
 
         <!-- HOME -->
@@ -271,7 +251,8 @@ foreach (
                         [
                             'users',
                             'create-user',
-                            'notices'
+                            'notices',
+                            'audit'
                         ],
                         true
                     )
@@ -315,6 +296,31 @@ foreach (
                     </a>
 
 
+                    <!-- AUDIT TRAIL -->
+
+                    <a
+                        href="/pbo-portal/admin/audit-trail.php"
+                    >
+
+                        <span class="dropdown-icon gold-icon">
+                            A
+                        </span>
+
+                        <span class="dropdown-copy">
+
+                            <strong>
+                                Audit Trail
+                            </strong>
+
+                            <small>
+                                Changes to submitted records
+                            </small>
+
+                        </span>
+
+                    </a>
+
+                </div>
 
             </div>
 

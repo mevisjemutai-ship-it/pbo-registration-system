@@ -5,31 +5,30 @@ config/database.php
 .env
 .env.*
 !.env.example
-
 # User uploaded signatures/files
 uploads/*
 !uploads/.gitkeep
-
 # Database dumps
-*.sql
 *.sql.gz
 *.dump
-
 # Allow clean deployment schema
 !database/
 !database/schema.sql
-
 # Logs and runtime files
 *.log
 logs/
 cache/
 tmp/
 sessions/
-
 # Editor files
 .vscode/
 .idea/
-
 # Operating system files
 .DS_Store
 Thumbs.db
+config/mail.php
+!uploads/.htaccess
+!uploads/index.php
+*.bak
+*.bak-*
+*.zip

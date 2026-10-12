@@ -551,7 +551,7 @@ require_once __DIR__ . '/includes/header.php';
         minmax(240px, 1.8fr)
         minmax(130px, .8fr)
         minmax(120px, .7fr)
-        auto;
+        110px;
 
     align-items: center;
 
@@ -639,6 +639,12 @@ require_once __DIR__ . '/includes/header.php';
 }
 
 
+.dashboard-page .quick-grid {
+    grid-template-columns:
+        repeat(3, minmax(0, 1fr));
+}
+
+
 .dashboard-empty {
     padding: 32px 20px;
 
@@ -655,6 +661,12 @@ require_once __DIR__ . '/includes/header.php';
    ============================================================== */
 
 @media (max-width: 1050px) {
+
+    .dashboard-page .quick-grid {
+        grid-template-columns:
+            repeat(2, minmax(0, 1fr));
+    }
+
 
     .dashboard-overview-grid {
         grid-template-columns:
@@ -677,6 +689,11 @@ require_once __DIR__ . '/includes/header.php';
 
 
 @media (max-width: 650px) {
+
+    .dashboard-page .quick-grid {
+        grid-template-columns: 1fr;
+    }
+
 
     .dashboard-overview-grid {
         grid-template-columns: 1fr;
@@ -792,7 +809,7 @@ require_once __DIR__ . '/includes/header.php';
                 </strong>
 
                 <span class="dashboard-stat-description">
-                    Applications recorded by you
+                    Submitted records in the registry
                 </span>
 
             </div>
@@ -965,6 +982,8 @@ require_once __DIR__ . '/includes/header.php';
 
                 </div>
 
+            </a>
+
 
             <!-- RECORDS -->
 
@@ -1029,6 +1048,7 @@ require_once __DIR__ . '/includes/header.php';
 
             </div>
 
+        </div>
 
 
         <div class="dashboard-recent-list">

@@ -101,12 +101,16 @@ function formatRegistrationDate(
 
     try {
 
+        /*
+        | Short month keeps the date column compact in long lists.
+        */
+
         return (
             new DateTimeImmutable(
                 $value
             )
         )->format(
-            'd F Y'
+            'd M Y'
         );
 
     } catch (Throwable $exception) {
@@ -285,9 +289,12 @@ if (
 |--------------------------------------------------------------------------
 | Pagination
 |--------------------------------------------------------------------------
+|
+| Rows are now compact, so a page shows 50 organizations.
+|
 */
 
-$perPage = 25;
+$perPage = 50;
 
 
 $page =
@@ -1192,8 +1199,7 @@ require_once __DIR__ .
 
     transition:
         background .15s ease,
-        border-color .15s ease
-        ,
+        border-color .15s ease,
         color .15s ease;
 }
 
@@ -1286,10 +1292,18 @@ require_once __DIR__ .
 
 /* ==============================================================
    REGISTRY TABLE
+   ==============================================================
+   Compact rows for long lists (1,000+ organizations):
+   - about 44px per row instead of about 90px
+   - the column header stays visible while scrolling
    ============================================================== */
 
 .registry-list {
-    overflow: hidden;
+    /*
+    | "clip" keeps the rounded corners but, unlike "hidden",
+    | still lets the column header stick while scrolling.
+    */
+    overflow: clip;
 
     background: #ffffff;
 
@@ -1317,28 +1331,31 @@ require_once __DIR__ .
 
     table-layout:
         fixed;
+
+    font-variant-numeric:
+        tabular-nums;
 }
 
 
 /* ==============================================================
-   TABLE HEADER
+   TABLE HEADER (sticky)
    ============================================================== */
 
-.registry-table thead {
-    background:
-        linear-gradient(
-            100deg,
-            var(--registry-navy-deep),
-            var(--registry-navy)
-        );
-}
-
-
 .registry-table th {
-    position: relative;
+    position: sticky;
+
+    /*
+    | Sits just below the sticky blue navigation bar.
+    */
+    top: 55px;
+
+    z-index: 2;
 
     padding:
-        16px 20px;
+        11px 18px;
+
+    background:
+        var(--registry-navy-deep);
 
     color:
         rgba(
@@ -1360,39 +1377,18 @@ require_once __DIR__ .
 }
 
 
-.registry-table th + th::before {
-    content: '';
-
-    position: absolute;
-
-    left: 0;
-    top: 25%;
-    bottom: 25%;
-
-    width: 1px;
-
-    background:
-        rgba(
-            255,
-            255,
-            255,
-            .13
-        );
-}
-
-
 .registry-table th:first-child {
-    width: 27%;
+    width: 22%;
 }
 
 
 .registry-table th:nth-child(2) {
-    width: 46%;
+    width: 58%;
 }
 
 
 .registry-table th:last-child {
-    width: 27%;
+    width: 20%;
 }
 
 
@@ -1406,33 +1402,28 @@ require_once __DIR__ .
     background: #ffffff;
 
     transition:
-        background .15s ease,
-        box-shadow .15s ease;
+        background .12s ease;
 }
 
 
 .registry-row:nth-child(even) {
     background:
-        #fbfcfd;
+        #f8fafc;
 }
 
 
 .registry-row + .registry-row {
     border-top:
-        1px solid #dce5ea;
+        1px solid #e6edf1;
 }
 
 
 .registry-row:hover {
     background:
-        linear-gradient(
-            90deg,
-            #edf6fc,
-            #f9fcfe
-        );
+        #edf6fc;
 
     box-shadow:
-        inset 5px 0 0
+        inset 4px 0 0
         var(--registry-gold);
 }
 
@@ -1449,7 +1440,7 @@ require_once __DIR__ .
 
 .registry-table td {
     padding:
-        23px 20px;
+        10px 18px;
 
     vertical-align:
         middle;
@@ -1461,32 +1452,30 @@ require_once __DIR__ .
    ============================================================== */
 
 .registry-number {
-    display: inline-flex;
-
-    align-items: center;
-
-    min-height: 36px;
+    display: inline-block;
 
     padding:
-        7px 12px;
+        2px 8px;
 
     background:
         var(--registry-blue-soft);
 
     border:
-        1px solid #c5ddea;
+        1px solid #d3e5f0;
 
-    border-radius: 8px;
+    border-radius: 6px;
 
     color:
         var(--registry-navy-deep);
 
-    font-size: 14px;
-    font-weight: 900;
+    font-size: 12.5px;
+    font-weight: 700;
 
-    letter-spacing: .3px;
+    letter-spacing: .2px;
 
-    line-height: 1.25;
+    line-height: 1.5;
+
+    white-space: nowrap;
 }
 
 
@@ -1497,39 +1486,32 @@ require_once __DIR__ .
 .registry-name {
     display: block;
 
+    overflow: hidden;
+
     color:
         var(--registry-navy-deep);
 
-    font-size: 16px;
-    font-weight: 900;
+    font-size: 14px;
+    font-weight: 650;
 
-    line-height: 1.35;
+    line-height: 1.4;
+
+    /*
+    | Long names stay on one line; the full name shows on hover.
+    */
+    text-overflow: ellipsis;
+
+    white-space: nowrap;
 }
 
 
-.registry-row-hint {
-    display: inline-flex;
-
-    align-items: center;
-
-    margin-top: 6px;
-
+.registry-row:hover .registry-name {
     color:
         var(--registry-blue);
 
-    font-size: 8px;
-    font-weight: 800;
+    text-decoration: underline;
 
-    letter-spacing: .1px;
-}
-
-
-.registry-row-hint::after {
-    content: '→';
-
-    margin-left: 6px;
-
-    font-size: 11px;
+    text-underline-offset: 3px;
 }
 
 
@@ -1541,30 +1523,14 @@ require_once __DIR__ .
     display: block;
 
     color:
-        var(--registry-text);
+        var(--registry-secondary);
 
-    font-size: 14px;
-    font-weight: 900;
+    font-size: 13px;
+    font-weight: 600;
 
-    line-height: 1.35;
-}
+    line-height: 1.4;
 
-
-.registry-date-label {
-    display: block;
-
-    margin-top: 5px;
-
-    color:
-        var(--registry-muted);
-
-    font-size: 7px;
-    font-weight: 900;
-
-    letter-spacing: .55px;
-
-    text-transform:
-        uppercase;
+    white-space: nowrap;
 }
 
 
@@ -1816,13 +1782,23 @@ require_once __DIR__ .
     }
 
 
+    /*
+    | On phones the table scrolls sideways, so the header
+    | scrolls with it instead of sticking.
+    */
+
     .registry-list {
         overflow-x: auto;
     }
 
 
     .registry-table {
-        min-width: 720px;
+        min-width: 600px;
+    }
+
+
+    .registry-table th {
+        position: static;
     }
 }
 
@@ -2231,6 +2207,12 @@ require_once __DIR__ .
                                     ]
                                 );
 
+                            $pboName =
+                                (string)
+                                $pbo[
+                                    'pbo_name'
+                                ];
+
                             ?>
 
 
@@ -2242,10 +2224,7 @@ require_once __DIR__ .
                                     $recordUrl
                                 ) ?>"
                                 aria-label="Open registration record for <?= e(
-                                    (string)
-                                    $pbo[
-                                        'pbo_name'
-                                    ]
+                                    $pboName
                                 ) ?>"
                             >
 
@@ -2271,19 +2250,15 @@ require_once __DIR__ .
 
                                 <td>
 
-                                    <span class="registry-name">
+                                    <span
+                                        class="registry-name"
+                                        title="<?= e($pboName) ?>"
+                                    >
 
                                         <?= displayValue(
-                                            $pbo[
-                                                'pbo_name'
-                                            ]
+                                            $pboName
                                         ) ?>
 
-                                    </span>
-
-
-                                    <span class="registry-row-hint">
-                                        Open registration record
                                     </span>
 
                                 </td>
@@ -2304,24 +2279,6 @@ require_once __DIR__ .
                                         ) ?>
 
                                     </span>
-
-
-                                    <?php if (
-                                        trim(
-                                            (string)
-                                            (
-                                                $pbo[
-                                                    'registration_date'
-                                                ] ?? ''
-                                            )
-                                        ) !== ''
-                                    ): ?>
-
-                                        <span class="registry-date-label">
-                                            Registered
-                                        </span>
-
-                                    <?php endif; ?>
 
                                 </td>
 
@@ -2422,7 +2379,7 @@ require_once __DIR__ .
                             href="<?= e(
                                 buildPboListUrl([
                                     'page' =>
-                                                                            max(
+                                        max(
                                             1,
                                             $page - 1
                                         ),

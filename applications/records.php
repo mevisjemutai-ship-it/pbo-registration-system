@@ -205,10 +205,12 @@ $availableYears = $yearsStatement->fetchAll(
 
 /*
 |--------------------------------------------------------------------------
-| Active staff accounts
+| Accounts for the "Submitted by" filter
 |--------------------------------------------------------------------------
 |
-| Only administrators need this list.
+| Only administrators need this list. It includes administrators and
+| staff: every active account, plus any account (even a disabled one)
+| that has submitted records, so older records can still be found.
 |
 */
 
@@ -221,12 +223,18 @@ if ($isAdmin) {
         SELECT
             id,
             username,
-            full_name
+            full_name,
+            role
 
         FROM users
 
-        WHERE role = 'staff'
-          AND is_active = 1
+        WHERE is_active = 1
+           OR id IN (
+                SELECT DISTINCT submitted_by
+                FROM pbo_applications
+                WHERE status = 'submitted'
+                  AND submitted_by IS NOT NULL
+           )
 
         ORDER BY full_name ASC
         "
@@ -710,1502 +718,705 @@ require_once __DIR__ . '/../includes/header.php';
 
 <style>
 
-/*
-|--------------------------------------------------------------------------
-| Submitted Records
-|--------------------------------------------------------------------------
-|
-| This stylesheet is intentionally scoped to this page.
-| The shared header, navigation and footer remain controlled by
-| the site's existing assets/css/style.css and include files.
-|--------------------------------------------------------------------------
-*/
+/* ==============================================================
+   SUBMITTED RECORDS
+   Uses the shared colour variables from assets/css/style.css.
+   ============================================================== */
 
+.rec {
+    --rec-ink: var(--heading, #15283b);
+    --rec-muted: #5f6b78;
+    --rec-line: #e2e6eb;
+    --rec-radius: 12px;
 
-.records-page {
     width: 100%;
-    max-width: 1500px;
+    max-width: 1320px;
     margin: 0 auto;
+    color: var(--text, #26313d);
+    font-variant-numeric: tabular-nums;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| Page heading
-|--------------------------------------------------------------------------
-*/
-
-.records-heading {
-    position: relative;
-    overflow: hidden;
-
-    margin-bottom: 24px;
-    padding: 27px 30px;
-
-    background:
-        linear-gradient(
-            110deg,
-            #eaf0f6 0%,
-            #f7f9fb 54%,
-            #f8f4e9 100%
-        );
-
-    border: 1px solid #d5e0e9;
-
-    border-left: 5px solid #587492;
-
-    border-bottom: 2px solid #d5b96a;
-
-    border-radius: 10px;
-
-    box-shadow:
-        0 3px 12px rgba(31, 52, 73, 0.06);
-}
-
-
-.records-heading::after {
-    content: "";
-
-    position: absolute;
-
-    right: -55px;
-    top: -120px;
-
-    width: 270px;
-    height: 270px;
-
-    border: 34px solid
-        rgba(47, 73, 110, 0.035);
-
-    border-radius: 50%;
-}
-
-
-.records-heading-content {
-    position: relative;
-    z-index: 2;
-}
-
-
-.records-eyebrow {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-
-    margin-bottom: 7px;
-
-    color: #71839a;
-
-    font-size: 10px;
-    font-weight: 800;
-
-    letter-spacing: 1.25px;
-    text-transform: uppercase;
-}
-
-
-.records-eyebrow::before {
-    content: "";
-
-    width: 21px;
-    height: 2px;
-
-    background: #bf962d;
-
-    border-radius: 10px;
-}
-
-
-.records-heading h1 {
+.rec h1,
+.rec h2,
+.rec h3,
+.rec p {
     margin: 0;
+}
 
-    color: #30465e;
+.rec-panel {
+    background: #ffffff;
+    border: 1px solid var(--rec-line);
+    border-radius: var(--rec-radius);
+}
 
-    font-size: 27px;
-    line-height: 1.2;
-
-    font-weight: 750;
-
-    text-align: left;
-    text-transform: none;
+.rec a:focus-visible,
+.rec button:focus-visible,
+.rec input:focus-visible,
+.rec select:focus-visible {
+    outline: 3px solid rgba(201, 154, 46, 0.55);
+    outline-offset: 2px;
 }
 
 
-.records-heading p {
-    max-width: 800px;
+/* ---------- Title + figures (same family as List of PBOs) ---------- */
 
-    margin: 7px 0 0;
+.rec-head {
+    position: relative;
+    margin-bottom: 18px;
+    overflow: hidden;
+    border: 0;
+    border-radius: 14px;
+    box-shadow: 0 9px 28px rgba(8, 45, 75, .12);
+}
 
-    color: #68788a;
+.rec-title {
+    position: relative;
+    padding: 28px 32px 24px;
+    background: linear-gradient(112deg, #062945, #0b3557 58%, #176b9f);
+    color: #ffffff;
+}
 
-    font-size: 12px;
+.rec-title::after {
+    content: "";
+    position: absolute;
+    top: -105px;
+    right: -55px;
+    width: 235px;
+    height: 235px;
+    border: 38px solid rgba(255, 255, 255, .04);
+    border-radius: 50%;
+    pointer-events: none;
+}
+
+.rec-title h1 {
+    position: relative;
+    z-index: 1;
+    color: #ffffff;
+    font-size: 30px;
+    font-weight: 800;
+    letter-spacing: -0.015em;
+    line-height: 1.15;
+}
+
+.rec-title p {
+    position: relative;
+    z-index: 1;
+    max-width: 70ch;
+    margin-top: 8px;
+    color: rgba(255, 255, 255, .8);
+    font-size: 14px;
     line-height: 1.55;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| Dashboard cards
-|--------------------------------------------------------------------------
-*/
-
-.records-stat-grid {
+.rec-ledger {
     display: grid;
-
-    grid-template-columns:
-        repeat(3, minmax(0, 1fr));
-
-    gap: 17px;
-
-    margin-bottom: 22px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    border-top: 5px solid #d69a18;
+    background: #ffffff;
 }
 
-
-.records-stat {
-    position: relative;
-
-    min-height: 126px;
-
-    overflow: hidden;
-
-    padding: 20px 21px;
-
-    border-radius: 11px;
-
-    box-shadow:
-        0 3px 11px rgba(31, 52, 73, 0.07);
+.rec-figure {
+    padding: 18px 32px 20px;
 }
 
-
-.records-stat::after {
-    content: "";
-
-    position: absolute;
-
-    width: 115px;
-    height: 115px;
-
-    right: -47px;
-    bottom: -61px;
-
-    border-radius: 50%;
-
-    background: rgba(255,255,255,0.10);
+.rec-figure + .rec-figure {
+    border-left: 1px solid var(--rec-line);
 }
 
-
-.records-stat-blue {
-    background:
-        linear-gradient(
-            135deg,
-            #526d8c,
-            #67809b
-        );
-
-    color: #fff;
-}
-
-
-.records-stat-red {
-    background:
-        linear-gradient(
-            135deg,
-            #a9545d,
-            #bd6970
-        );
-
-    color: #fff;
-}
-
-
-.records-stat-gold {
-    background:
-        linear-gradient(
-            135deg,
-            #a68b46,
-            #b9a05c
-        );
-
-    color: #fff;
-}
-
-
-.records-stat-top {
-    position: relative;
-    z-index: 2;
-
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-
-    gap: 10px;
-}
-
-
-.records-stat-label {
-    font-size: 10px;
-    font-weight: 800;
-
-    letter-spacing: 1px;
-    text-transform: uppercase;
-
-    opacity: .86;
-}
-
-
-.records-stat-icon {
-    width: 34px;
-    height: 34px;
-
-    display: grid;
-    place-items: center;
-
-    border-radius: 9px;
-
-    background: rgba(255,255,255,.13);
-
-    font-size: 13px;
-    font-weight: 800;
-}
-
-
-.records-stat-number {
-    position: relative;
-    z-index: 2;
-
+.rec-figure strong {
     display: block;
-
-    margin-top: 13px;
-
-    font-size: 30px;
-    line-height: 1;
-
-    font-weight: 800;
-}
-
-
-.records-stat-description {
-    position: relative;
-    z-index: 2;
-
-    margin-top: 7px;
-
-    color: rgba(255,255,255,.76);
-
-    font-size: 10px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Filters
-|--------------------------------------------------------------------------
-*/
-
-.records-filter-card {
-    margin-bottom: 22px;
-
-    background: #fff;
-
-    border: 1px solid #dfe5eb;
-
-    border-radius: 10px;
-
-    box-shadow:
-        0 2px 9px rgba(31,52,73,.05);
-
-    overflow: hidden;
-}
-
-
-.records-filter-header {
-    display: flex;
-
-    align-items: center;
-    justify-content: space-between;
-
-    padding: 14px 18px;
-
-    background:
-        linear-gradient(
-            100deg,
-            #f3f6f9,
-            #fafbfc
-        );
-
-    border-bottom: 1px solid #e3e8ee;
-}
-
-
-.records-filter-title {
-    display: flex;
-
-    align-items: center;
-
-    gap: 9px;
-
-    margin: 0;
-
-    color: #43586e;
-
-    font-size: 13px;
+    color: var(--rec-ink);
+    font-size: 28px;
     font-weight: 750;
+    line-height: 1.1;
+}
+
+.rec-figure span {
+    display: block;
+    margin-top: 6px;
+    color: var(--rec-ink);
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.rec-figure span::before {
+    content: "";
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    margin-right: 8px;
+    border-radius: 50%;
+    background: var(--figure-accent, var(--blue));
+    vertical-align: 1px;
+}
+
+.rec-figure small {
+    display: block;
+    margin-top: 2px;
+    color: var(--rec-muted);
+    font-size: 12.5px;
 }
 
 
-.records-filter-mark {
-    width: 7px;
-    height: 21px;
+/* ---------- Filters ---------- */
 
-    border-radius: 5px;
-
-    background:
-        linear-gradient(
-            to bottom,
-            #587492 0 55%,
-            #c07077 55% 77%,
-            #bf962d 77% 100%
-        );
+.rec-filters {
+    margin-bottom: 18px;
+    padding: 18px 20px;
 }
 
-
-.records-filter-body {
-    padding: 18px;
-}
-
-
-.records-filter-grid {
+.rec-filter-grid {
     display: grid;
-
-    grid-template-columns:
-        minmax(270px, 1.8fr)
-        minmax(145px, .75fr)
-        minmax(145px, .75fr)
-        minmax(190px, 1fr)
-        auto;
-
+    grid-template-columns: minmax(260px, 2fr) repeat(var(--rec-selects, 2), minmax(140px, 1fr)) auto;
     gap: 12px;
-
     align-items: end;
 }
 
-
-.records-field {
-    min-width: 0;
-}
-
-
-.records-label {
+.rec-field label {
     display: block;
-
     margin-bottom: 6px;
-
-    color: #687686;
-
-    font-size: 10px;
-    font-weight: 800;
-
-    letter-spacing: .7px;
-    text-transform: uppercase;
+    color: var(--rec-ink);
+    font-size: 13px;
+    font-weight: 600;
 }
 
+.rec-control {
+    width: 100%;
+    height: 44px;
+    padding: 0 12px;
+    border: 1px solid #c9d1da;
+    border-radius: 8px;
+    background: #ffffff;
+    color: var(--rec-ink);
+    font-size: 14px;
+}
 
-.records-input-wrap {
+.rec-control:hover {
+    border-color: #aab6c3;
+}
+
+.rec-control:focus {
+    border-color: var(--blue, #123b69);
+    box-shadow: 0 0 0 3px rgba(18, 59, 105, 0.12);
+    outline: none;
+}
+
+.rec-search {
     position: relative;
 }
 
-
-.records-search-icon {
+.rec-search svg {
     position: absolute;
-
-    left: 12px;
     top: 50%;
-
+    left: 12px;
+    width: 17px;
+    height: 17px;
     transform: translateY(-50%);
-
-    color: #94a0ad;
-
-    font-size: 14px;
-
+    color: #7d8895;
     pointer-events: none;
 }
 
-
-.records-control {
-    width: 100%;
-    height: 42px;
-
-    padding: 0 12px;
-
-    border: 1px solid #d8dfe7;
-
-    border-radius: 8px;
-
-    background: #fbfcfd;
-
-    color: #344252;
-
-    outline: none;
-
-    transition:
-        border-color .16s ease,
-        box-shadow .16s ease,
-        background .16s ease;
+.rec-search .rec-control {
+    padding-left: 38px;
 }
 
-
-.records-input-wrap
-.records-control {
-    padding-left: 35px;
-}
-
-
-.records-control:hover {
-    background: #fff;
-
-    border-color: #c7d0db;
-}
-
-
-.records-control:focus {
-    background: #fff;
-
-    border-color: #7189a2;
-
-    box-shadow:
-        0 0 0 3px rgba(88,116,146,.10);
-}
-
-
-.records-filter-actions {
+.rec-filter-actions {
     display: flex;
-
     gap: 8px;
 }
 
-
-.records-button {
-    height: 42px;
-
+.rec-button {
     display: inline-flex;
-
     align-items: center;
     justify-content: center;
-
-    gap: 7px;
-
-    padding: 0 15px;
-
+    height: 44px;
+    padding: 0 18px;
     border-radius: 8px;
-
-    font-size: 11px;
-    font-weight: 750;
-
-    text-decoration: none;
-
-    cursor: pointer;
-
-    white-space: nowrap;
-
-    transition:
-        transform .15s ease,
-        box-shadow .15s ease,
-        background .15s ease;
-}
-
-
-.records-button:hover {
-    transform: translateY(-1px);
-}
-
-
-.records-button-primary {
-    border: 1px solid #526d8c;
-
-    background: #526d8c;
-
-    color: #fff;
-
-    box-shadow:
-        0 4px 10px rgba(82,109,140,.16);
-}
-
-
-.records-button-primary:hover {
-    background: #465f7b;
-}
-
-
-.records-button-reset {
-    border: 1px solid #d8dee6;
-
-    background: #f5f7f9;
-
-    color: #657180;
-}
-
-
-.records-button-reset:hover {
-    background: #eceff3;
-}
-
-
-.records-active-filters {
-    display: flex;
-
-    flex-wrap: wrap;
-
-    align-items: center;
-
-    gap: 7px;
-
-    margin-top: 14px;
-
-    padding-top: 13px;
-
-    border-top: 1px dashed #dfe4ea;
-}
-
-
-.records-active-label {
-    color: #87919e;
-
-    font-size: 10px;
+    font-size: 14px;
     font-weight: 650;
+    white-space: nowrap;
+    cursor: pointer;
+    text-decoration: none;
 }
 
+.rec-button-primary {
+    background: var(--blue, #123b69);
+    border: 1px solid var(--blue, #123b69);
+    color: #ffffff;
+}
 
-.records-filter-chip {
-    display: inline-flex;
+.rec-button-primary:hover {
+    background: var(--blue-dark, #092b50);
+    color: #ffffff;
+}
 
+.rec-button-quiet {
+    background: #ffffff;
+    border: 1px solid #c9d1da;
+    color: var(--rec-ink);
+}
+
+.rec-button-quiet:hover {
+    background: var(--blue-soft, #f6f9fc);
+    color: var(--rec-ink);
+}
+
+.rec-active {
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
+    gap: 8px;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid #eef1f4;
+    color: var(--rec-muted);
+    font-size: 13px;
+}
 
-    padding: 5px 9px;
-
+.rec-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
     border-radius: 999px;
+    background: var(--blue-light, #edf4fb);
+    color: var(--blue-dark, #092b50);
+    font-size: 13px;
+    font-weight: 600;
+}
 
-    background: #edf2f7;
+.rec-clear {
+    margin-left: 4px;
+    color: var(--red, #b5222a);
+    font-weight: 600;
+}
 
-    border: 1px solid #dce4ec;
-
-    color: #53687d;
-
-    font-size: 10px;
-    font-weight: 700;
+.rec-clear:hover {
+    color: var(--red-dark, #8f1720);
+    text-decoration: underline;
 }
 
 
-.records-filter-chip-red {
-    background: #fbefef;
+/* ---------- Results ---------- */
 
-    border-color: #efd5d7;
-
-    color: #9a4e56;
-}
-
-
-.records-filter-chip-gold {
-    background: #faf5e7;
-
-    border-color: #ecdfba;
-
-    color: #92752e;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Results
-|--------------------------------------------------------------------------
-*/
-
-.records-results {
-    background: #fff;
-
-    border: 1px solid #dfe5eb;
-
-    border-radius: 10px;
-
-    box-shadow:
-        0 2px 9px rgba(31,52,73,.05);
-
+.rec-results {
     overflow: hidden;
 }
 
-
-.records-results-header {
+.rec-results-head {
     display: flex;
-
-    align-items: center;
+    align-items: baseline;
     justify-content: space-between;
-
-    gap: 15px;
-
-    padding: 16px 18px;
-
-    border-bottom: 1px solid #e2e7ed;
-
-    background:
-        linear-gradient(
-            100deg,
-            #fbfcfd,
-            #f8fafb
-        );
+    gap: 16px;
+    padding: 20px 24px 14px;
 }
 
-
-.records-results-title {
-    margin: 0;
-
-    color: #3b4e62;
-
-    font-size: 15px;
-    font-weight: 800;
+.rec-results-head h2 {
+    color: var(--rec-ink);
+    font-size: 17px;
+    font-weight: 700;
 }
 
-
-.records-results-subtitle {
-    margin: 4px 0 0;
-
-    color: #7c8794;
-
-    font-size: 10px;
+.rec-results-head p {
+    margin-top: 3px;
+    color: var(--rec-muted);
+    font-size: 13px;
 }
 
-
-.records-results-count {
+.rec-total {
     flex-shrink: 0;
-
-    padding: 6px 10px;
-
-    border-radius: 999px;
-
-    background: #f7f2e3;
-
-    border: 1px solid #eadfbf;
-
-    color: #8c702d;
-
-    font-size: 10px;
-    font-weight: 800;
+    color: var(--rec-muted);
+    font-size: 13px;
 }
 
+.rec-total strong {
+    color: var(--rec-ink);
+}
 
-/*
-|--------------------------------------------------------------------------
-| Table
-|--------------------------------------------------------------------------
-*/
-
-.records-table-wrap {
+.rec-table-wrap {
     width: 100%;
-
     overflow-x: auto;
 }
 
-
-.records-table {
+.rec-table {
     width: 100%;
-
-    min-width: 1030px;
-
-    border-collapse: separate;
-    border-spacing: 0;
+    min-width: 980px;
+    border-collapse: collapse;
 }
 
-
-.records-table thead th {
-    padding: 12px 15px;
-
-    background: #f5f7f9;
-
-    border-bottom: 1px solid #dfe5eb;
-
-    color: #64707d;
-
-    font-size: 9px;
-    font-weight: 850;
-
-    letter-spacing: .8px;
-
+.rec-table th {
+    padding: 11px 16px;
+    background: #f6f8fa;
+    border-top: 1px solid var(--rec-line);
+    border-bottom: 1px solid var(--rec-line);
+    color: var(--rec-muted);
+    font-size: 12.5px;
+    font-weight: 600;
     text-align: left;
-    text-transform: uppercase;
-
     white-space: nowrap;
 }
 
-
-.records-table tbody td {
-    padding: 14px 15px;
-
-    background: #fff;
-
-    border-bottom: 1px solid #edf0f3;
-
+.rec-table td {
+    padding: 15px 16px;
+    border-bottom: 1px solid #eef1f4;
+    font-size: 14px;
     vertical-align: middle;
 }
 
-
-.records-table tbody tr {
-    transition:
-        background .15s ease;
-}
-
-
-.records-table tbody tr:hover td {
-    background: #fafbfd;
-}
-
-
-.records-table tbody tr:last-child td {
+.rec-table tbody tr:last-child td {
     border-bottom: 0;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| Application reference
-|--------------------------------------------------------------------------
-*/
-
-.records-reference {
-    display: flex;
-
-    flex-direction: column;
-
-    gap: 5px;
-
-    min-width: 140px;
+.rec-table tbody tr:hover td {
+    background: var(--blue-soft, #f6f9fc);
 }
 
-
-.records-reference-code {
-    display: inline-flex;
-
-    align-items: center;
-
-    width: fit-content;
-
-    padding: 5px 8px;
-
-    border-radius: 6px;
-
-    background: #edf2f7;
-
-    border: 1px solid #dce4ec;
-
-    color: #536b83;
-
-    font-size: 10px;
-    font-weight: 850;
+.rec-table th:last-child {
+    position: relative;
 }
 
-
-.records-reference-id {
-    color: #9aa4af;
-
-    font-size: 9px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Organization
-|--------------------------------------------------------------------------
-*/
-
-.records-organization {
-    min-width: 245px;
-
-    max-width: 350px;
-}
-
-
-.records-organization-name {
-    color: #2f3d4d;
-
-    font-size: 12px;
-    font-weight: 800;
-
-    line-height: 1.4;
-
-    word-break: break-word;
-}
-
-
-.records-organization-meta {
-    display: flex;
-
-    align-items: center;
-
-    gap: 6px;
-
-    margin-top: 5px;
-
-    color: #919aa5;
-
-    font-size: 9px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| PBO number
-|--------------------------------------------------------------------------
-*/
-
-.records-registration-number {
-    color: #4b5662;
-
-    font-size: 11px;
-    font-weight: 650;
-
+.rec-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
     white-space: nowrap;
 }
 
+.rec-table th:first-child,
+.rec-table td:first-child {
+    padding-left: 24px;
+}
 
-.records-registration-number.empty {
-    color: #a7afb9;
+.rec-table th:last-child,
+.rec-table td:last-child {
+    padding-right: 24px;
+    text-align: right;
+}
 
+.rec-org {
+    min-width: 230px;
+    max-width: 340px;
+}
+
+.rec-org a {
+    color: var(--rec-ink);
+    font-size: 14.5px;
+    font-weight: 650;
+    line-height: 1.4;
+}
+
+.rec-org a:hover {
+    color: var(--blue, #123b69);
+    text-decoration: underline;
+}
+
+.rec-sub {
+    display: block;
+    margin-top: 2px;
+    color: var(--rec-muted);
+    font-size: 12.5px;
+}
+
+.rec-ref {
+    color: var(--blue-dark, #092b50);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.rec-number {
+    white-space: nowrap;
+}
+
+.rec-number.is-empty {
+    color: #8a949f;
     font-style: italic;
-
-    font-weight: 500;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| Registration type
-|--------------------------------------------------------------------------
-*/
-
-.records-type {
-    display: inline-flex;
-
-    align-items: center;
-
-    padding: 5px 9px;
-
-    border-radius: 999px;
-
-    font-size: 9px;
-    font-weight: 800;
-}
-
-
-.records-type-national {
-    background: #edf2f7;
-
-    border: 1px solid #dce5ed;
-
-    color: #526a82;
-}
-
-
-.records-type-international {
-    background: #fbefef;
-
-    border: 1px solid #efd5d7;
-
-    color: #9d5159;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Submitted By
-|--------------------------------------------------------------------------
-*/
-
-.records-submitted-by {
-    min-width: 190px;
-
-    max-width: 235px;
-}
-
-
-.records-submitter {
-    display: flex;
-
-    align-items: center;
-
-    gap: 9px;
-
-    min-width: 0;
-}
-
-
-.records-submitter-avatar {
-    flex: 0 0 35px;
-
-    width: 35px;
-    height: 35px;
-
-    display: grid;
-
-    place-items: center;
-
-    border-radius: 9px;
-
-    background:
-        linear-gradient(
-            135deg,
-            #607b98,
-            #49627d
-        );
-
-    color: #fff;
-
-    font-size: 10px;
-    font-weight: 850;
-
-    box-shadow:
-        0 3px 8px rgba(73,98,125,.16);
-}
-
-
-.records-submitter-details {
-    min-width: 0;
-
-    display: flex;
-
-    flex-direction: column;
-}
-
-
-.records-submitter-name {
-    color: #354251;
-
-    font-size: 10.5px;
-    font-weight: 800;
-
-    line-height: 1.35;
-
-    overflow-wrap: anywhere;
-}
-
-
-.records-submitter-username {
-    margin-top: 3px;
-
-    color: #929ba6;
-
-    font-size: 9px;
-
-    line-height: 1.2;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Submission date
-|--------------------------------------------------------------------------
-*/
-
-.records-submitted-date {
-    min-width: 125px;
-}
-
-
-.records-date-main {
-    color: #3d4956;
-
-    font-size: 10.5px;
-    font-weight: 750;
-}
-
-
-.records-date-time {
+.rec-type {
     display: inline-block;
-
-    margin-top: 4px;
-
-    color: #929ba6;
-
-    font-size: 9px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| View button
-|--------------------------------------------------------------------------
-*/
-
-.records-action {
-    min-width: 82px;
-
-    text-align: right !important;
+.rec-type-national {
+    background: var(--blue-light, #edf4fb);
+    color: var(--blue, #123b69);
 }
 
+.rec-type-international {
+    background: var(--red-light, #fbeaec);
+    color: var(--red-dark, #8f1720);
+}
 
-.records-view {
-    display: inline-flex;
-
+.rec-person {
+    display: flex;
     align-items: center;
-    justify-content: center;
+    gap: 10px;
+    min-width: 170px;
+}
 
-    gap: 6px;
+.rec-avatar {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--gold-light, #fff8e5);
+    border: 1px solid #ecd9a4;
+    color: var(--gold-dark, #9d741d);
+    font-size: 11.5px;
+    font-weight: 700;
+}
 
-    padding: 8px 12px;
+.rec-person strong {
+    display: block;
+    color: var(--rec-ink);
+    font-size: 13.5px;
+    font-weight: 600;
+}
 
-    border-radius: 7px;
+.rec-date {
+    white-space: nowrap;
+}
 
-    background: #536e8c;
+.rec-view {
+    display: inline-flex;
+    align-items: center;
+    height: 34px;
+    padding: 0 14px;
+    border: 1px solid #c9d1da;
+    border-radius: 8px;
+    background: #ffffff;
+    color: var(--blue, #123b69);
+    font-size: 13px;
+    font-weight: 650;
+    white-space: nowrap;
+}
 
-    color: #fff;
-
-    font-size: 10px;
-    font-weight: 800;
-
-    text-decoration: none;
-
-    box-shadow:
-        0 4px 9px rgba(83,110,140,.16);
-
-    transition:
-        background .15s ease,
-        transform .15s ease,
-        box-shadow .15s ease;
+.rec-view:hover {
+    background: var(--blue, #123b69);
+    border-color: var(--blue, #123b69);
+    color: #ffffff;
 }
 
 
-.records-view:hover {
-    background: #465f79;
+/* ---------- Empty ---------- */
 
-    transform: translateY(-1px);
-
-    box-shadow:
-        0 5px 12px rgba(83,110,140,.22);
-}
-
-
-.records-view-icon {
-    font-size: 10px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Empty state
-|--------------------------------------------------------------------------
-*/
-
-.records-empty {
-    padding: 58px 25px;
-
+.rec-empty {
+    margin: 4px 24px 24px;
+    padding: 34px 24px;
+    border: 1px dashed #cfd6de;
+    border-radius: 10px;
     text-align: center;
 }
 
+.rec-empty h3 {
+    color: var(--rec-ink);
+    font-size: 16px;
+    font-weight: 700;
+}
 
-.records-empty-icon {
-    width: 58px;
-    height: 58px;
+.rec-empty p {
+    max-width: 52ch;
+    margin: 6px auto 0;
+    color: var(--rec-muted);
+    font-size: 14px;
+    line-height: 1.55;
+}
 
-    display: grid;
-
-    place-items: center;
-
-    margin: 0 auto 13px;
-
-    border-radius: 16px;
-
-    background:
-        linear-gradient(
-            135deg,
-            #edf2f7,
-            #f8f3e6
-        );
-
-    border: 1px solid #dfe5eb;
-
-    color: #637b94;
-
-    font-size: 22px;
-    font-weight: 800;
+.rec-empty .rec-button {
+    margin-top: 14px;
 }
 
 
-.records-empty h3 {
-    margin: 0;
+/* ---------- Pagination ---------- */
 
-    color: #3d4c5b;
-
-    font-size: 15px;
-
-    font-weight: 800;
-
-    text-transform: none;
-}
-
-
-.records-empty p {
-    max-width: 470px;
-
-    margin: 7px auto 0;
-
-    color: #858f9b;
-
-    font-size: 10.5px;
-
-    line-height: 1.6;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Pagination
-|--------------------------------------------------------------------------
-*/
-
-.records-pagination {
+.rec-pagination {
     display: flex;
-
     align-items: center;
     justify-content: space-between;
-
-    gap: 15px;
-
-    padding: 13px 18px;
-
-    background: #fafbfc;
-
-    border-top: 1px solid #e3e8ed;
+    gap: 16px;
+    padding: 14px 24px;
+    border-top: 1px solid var(--rec-line);
+    color: var(--rec-muted);
+    font-size: 13px;
 }
 
-
-.records-pagination-info {
-    color: #89939e;
-
-    font-size: 9.5px;
+.rec-pagination strong {
+    color: var(--rec-ink);
 }
 
-
-.records-pagination-info strong {
-    color: #566372;
-}
-
-
-.records-pagination-links {
+.rec-pages {
     display: flex;
-
     align-items: center;
-
     gap: 4px;
 }
 
-
-.records-page-link {
-    min-width: 31px;
-    height: 31px;
-
-    display: inline-flex;
-
-    align-items: center;
-    justify-content: center;
-
+.rec-page {
+    display: inline-grid;
+    place-items: center;
+    min-width: 36px;
+    height: 36px;
     padding: 0 8px;
-
-    border-radius: 7px;
-
-    border: 1px solid #dce2e8;
-
-    background: #fff;
-
-    color: #667381;
-
-    font-size: 9.5px;
-    font-weight: 750;
-
-    text-decoration: none;
+    border: 1px solid #d5dce3;
+    border-radius: 8px;
+    background: #ffffff;
+    color: var(--rec-ink);
+    font-size: 13px;
+    font-weight: 600;
 }
 
-
-.records-page-link:hover {
-    background: #edf2f7;
-
-    border-color: #cfd9e3;
-
-    color: #526b84;
+.rec-page:hover {
+    background: var(--blue-soft, #f6f9fc);
+    color: var(--rec-ink);
 }
 
-
-.records-page-link.active {
-    background: #587492;
-
-    border-color: #587492;
-
-    color: #fff;
+.rec-page.is-current {
+    background: var(--blue, #123b69);
+    border-color: var(--blue, #123b69);
+    color: #ffffff;
 }
 
-
-.records-page-link.disabled {
-    opacity: .4;
-
+.rec-page.is-disabled {
+    opacity: 0.4;
     pointer-events: none;
 }
 
-
-.records-page-dots {
-    padding: 0 3px;
-
-    color: #9da6b0;
-
-    font-size: 11px;
+.rec-dots {
+    padding: 0 4px;
 }
 
 
-/*
-|--------------------------------------------------------------------------
-| Responsive
-|--------------------------------------------------------------------------
-*/
+/* ---------- Responsive ---------- */
 
-@media (max-width: 1180px) {
+@media (max-width: 1100px) {
 
-    .records-filter-grid {
-        grid-template-columns:
-            minmax(230px, 1fr)
-            minmax(145px, 1fr)
-            minmax(145px, 1fr);
+    .rec-filter-grid {
+        grid-template-columns: repeat(var(--rec-selects, 2), minmax(0, 1fr));
     }
 
-    .records-field-search {
+    .rec-filter-grid .rec-field-search,
+    .rec-filter-actions {
         grid-column: 1 / -1;
     }
+}
 
-    .records-filter-actions {
-        grid-column: 1 / -1;
+@media (max-width: 720px) {
+
+    .rec-title,
+    .rec-figure {
+        padding-left: 20px;
+        padding-right: 20px;
     }
 
-    .records-filter-actions .records-button {
+    .rec-title h1 {
+        font-size: 25px;
+    }
+
+    .rec-ledger,
+    .rec-filter-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .rec-figure + .rec-figure {
+        border-left: 0;
+        border-top: 1px solid var(--rec-line);
+    }
+
+    .rec-filter-actions .rec-button {
         flex: 1;
     }
-}
 
-
-@media (max-width: 820px) {
-
-    .records-stat-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .records-filter-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .records-field-search {
-        grid-column: auto;
-    }
-
-    .records-filter-actions {
-        grid-column: auto;
-    }
-
-    .records-heading {
-        padding: 23px;
-    }
-
-    .records-heading h1 {
-        font-size: 23px;
-    }
-
-    .records-pagination {
-        align-items: flex-start;
-
+    .rec-results-head,
+    .rec-pagination {
         flex-direction: column;
+        align-items: flex-start;
+        padding-left: 18px;
+        padding-right: 18px;
     }
 
-    .records-pagination-links {
-        width: 100%;
-
-        overflow-x: auto;
-
-        padding-bottom: 2px;
-    }
-}
-
-
-@media (max-width: 600px) {
-
-    .records-heading {
-        padding: 20px;
-    }
-
-    .records-filter-body,
-    .records-results-header {
-        padding: 14px;
-    }
-
-    .records-stat {
-        min-height: 115px;
+    .rec-pages {
+        flex-wrap: wrap;
     }
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| Print
-|--------------------------------------------------------------------------
-*/
 
 @media print {
 
-    .records-heading,
-    .records-filter-card,
-    .records-stat-grid,
-    .records-results-header,
-    .records-pagination {
+    .rec-filters,
+    .rec-ledger,
+    .rec-pagination,
+    .rec-table th:last-child,
+    .rec-table td:last-child {
         display: none !important;
     }
 
-    .records-page {
-        max-width: none;
-    }
-
-    .records-results {
+    .rec-panel {
         border: 0;
-
-        box-shadow: none;
     }
 
-    .records-table {
+    .rec-table {
         min-width: 0;
     }
-
-    .records-table-wrap {
-        overflow: visible;
-    }
-
-    .records-action {
-        display: none;
-    }
-
 }
 
 </style>
 
 
-<!-- ================================================================
-     SUBMITTED RECORDS PAGE
-     ================================================================ -->
-
-<div class="records-page">
-
+<div class="rec">
 
     <!-- ============================================================
-         PAGE HEADING
+         TITLE + FIGURES
          ============================================================ -->
 
-    <section class="records-heading">
+    <section class="rec-panel rec-head">
 
-        <div class="records-heading-content">
-
-            <div class="records-eyebrow">
-                PBO Registration &amp; Records
-            </div>
+        <div class="rec-title">
 
             <h1>
-                Submitted Records
+                Submitted records
             </h1>
 
             <p>
-                Review completed registration applications and track
-                submission activity within your authorized access.
+                <?php if ($isAdmin): ?>
+                    Every registration application submitted to the registry.
+                    Search by organization, reference or PBO number, or narrow
+                    by who submitted it and when.
+                <?php else: ?>
+                    Registration applications you have submitted. Search by
+                    organization, reference or PBO number, or narrow by
+                    submission date.
+                <?php endif; ?>
             </p>
 
         </div>
 
-    </section>
+        <div class="rec-ledger">
 
-
-    <!-- ============================================================
-         STATISTICS
-         ============================================================ -->
-
-    <section class="records-stat-grid">
-
-
-        <!-- TOTAL -->
-
-        <div class="records-stat records-stat-blue">
-
-            <div class="records-stat-top">
-
-                <span class="records-stat-label">
-                    Total Submitted
-                </span>
-
-                <span class="records-stat-icon">
-                    ✓
-                </span>
-
+            <div class="rec-figure" style="--figure-accent: var(--blue);">
+                <strong><?= number_format($totalSubmitted) ?></strong>
+                <span>Total submitted</span>
+                <small><?= $isAdmin && $selectedUserId === 0 ? 'Across all users' : ($isAdmin ? 'By the selected user' : 'Submitted by you') ?></small>
             </div>
 
-            <span class="records-stat-number">
-                <?= number_format($totalSubmitted) ?>
-            </span>
+            <div class="rec-figure" style="--figure-accent: var(--gold);">
+                <strong><?= number_format($thisYear) ?></strong>
+                <span>Submitted in <?= date('Y') ?></span>
+                <small>Year to date</small>
+            </div>
 
-            <div class="records-stat-description">
-                All submitted records within your access scope.
+            <div class="rec-figure" style="--figure-accent: var(--red);">
+                <strong><?= number_format($thisMonth) ?></strong>
+                <span>Submitted in <?= date('F') ?></span>
+                <small>This month so far</small>
             </div>
 
         </div>
-
-
-        <!-- YEAR -->
-
-        <div class="records-stat records-stat-red">
-
-            <div class="records-stat-top">
-
-                <span class="records-stat-label">
-                    This Year
-                </span>
-
-                <span class="records-stat-icon">
-                    Y
-                </span>
-
-            </div>
-
-            <span class="records-stat-number">
-                <?= number_format($thisYear) ?>
-            </span>
-
-            <div class="records-stat-description">
-                Submitted during <?= date('Y') ?>.
-            </div>
-
-        </div>
-
-
-        <!-- MONTH -->
-
-        <div class="records-stat records-stat-gold">
-
-            <div class="records-stat-top">
-
-                <span class="records-stat-label">
-                    This Month
-                </span>
-
-                <span class="records-stat-icon">
-                    M
-                </span>
-
-            </div>
-
-            <span class="records-stat-number">
-                <?= number_format($thisMonth) ?>
-            </span>
-
-            <div class="records-stat-description">
-                Submitted during <?= date('F Y') ?>.
-            </div>
-
-        </div>
-
 
     </section>
 
@@ -2214,315 +1425,180 @@ require_once __DIR__ . '/../includes/header.php';
          SEARCH AND FILTER
          ============================================================ -->
 
-    <section class="records-filter-card">
+    <section class="rec-panel rec-filters" aria-label="Search and filter records">
 
+        <form method="get" action="">
 
-        <div class="records-filter-header">
+            <div
+                class="rec-filter-grid"
+                style="--rec-selects: <?= $isAdmin ? 3 : 2 ?>;"
+            >
 
-            <h2 class="records-filter-title">
+                <div class="rec-field rec-field-search">
 
-                <span class="records-filter-mark"></span>
+                    <label for="records-search">
+                        Search
+                    </label>
 
-                Search &amp; Filter Records
+                    <div class="rec-search">
 
-            </h2>
+                        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <circle cx="8.5" cy="8.5" r="5.75" stroke="currentColor" stroke-width="1.8"/>
+                            <path d="M13 13l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                        </svg>
 
-        </div>
-
-
-        <div class="records-filter-body">
-
-            <form method="get" action="">
-
-
-                <div class="records-filter-grid">
-
-
-                    <!-- SEARCH -->
-
-                    <div class="records-field records-field-search">
-
-                        <label
-                            class="records-label"
-                            for="records-search"
+                        <input
+                            type="search"
+                            id="records-search"
+                            name="q"
+                            class="rec-control"
+                            value="<?= recordsEscape($search) ?>"
+                            placeholder="Organization, reference or PBO number"
                         >
-                            Search
-                        </label>
-
-                        <div class="records-input-wrap">
-
-                            <span class="records-search-icon">
-                                ⌕
-                            </span>
-
-                            <input
-                                type="search"
-                                id="records-search"
-                                name="q"
-                                class="records-control"
-                                value="<?= recordsEscape($search) ?>"
-                                placeholder="Organization name, application reference or PBO number..."
-                            >
-
-                        </div>
 
                     </div>
-
-
-                    <!-- STAFF -->
-
-                    <?php if ($isAdmin): ?>
-
-                        <div class="records-field">
-
-                            <label
-                                class="records-label"
-                                for="submitted_by"
-                            >
-                                Submitted By
-                            </label>
-
-                            <select
-                                id="submitted_by"
-                                name="submitted_by"
-                                class="records-control"
-                            >
-
-                                <option value="">
-                                    All Users
-                                </option>
-
-                                <?php foreach (
-                                    $staffUsers
-                                    as $staff
-                                ): ?>
-
-                                    <option
-                                        value="<?= (int) $staff['id'] ?>"
-                                        <?= (
-                                            $selectedUserId
-                                            === (int) $staff['id']
-                                        )
-                                            ? 'selected'
-                                            : ''
-                                        ?>
-                                    >
-                                        <?= recordsEscape(
-                                            $staff['full_name']
-                                        ) ?>
-                                    </option>
-
-                                <?php endforeach; ?>
-
-                            </select>
-
-                        </div>
-
-                    <?php endif; ?>
-
-
-                    <!-- YEAR -->
-
-                    <div class="records-field">
-
-                        <label
-                            class="records-label"
-                            for="records-year"
-                        >
-                            Year
-                        </label>
-
-                        <select
-                            id="records-year"
-                            name="year"
-                            class="records-control"
-                        >
-
-                            <option value="">
-                                All Years
-                            </option>
-
-                            <?php foreach (
-                                $availableYears
-                                as $year
-                            ): ?>
-
-                                <option
-                                    value="<?= (int) $year ?>"
-                                    <?= (
-                                        $filterYear
-                                        === (int) $year
-                                    )
-                                        ? 'selected'
-                                        : ''
-                                    ?>
-                                >
-                                    <?= (int) $year ?>
-                                </option>
-
-                            <?php endforeach; ?>
-
-                        </select>
-
-                    </div>
-
-
-                    <!-- MONTH -->
-
-                    <div class="records-field">
-
-                        <label
-                            class="records-label"
-                            for="records-month"
-                        >
-                            Month
-                        </label>
-
-                        <select
-                            id="records-month"
-                            name="month"
-                            class="records-control"
-                        >
-
-                            <option value="">
-                                All Months
-                            </option>
-
-                            <?php foreach (
-                                $months
-                                as $monthNumber => $monthName
-                            ): ?>
-
-                                <option
-                                    value="<?= $monthNumber ?>"
-                                    <?= (
-                                        $filterMonth
-                                        === $monthNumber
-                                    )
-                                        ? 'selected'
-                                        : ''
-                                    ?>
-                                >
-                                    <?= recordsEscape(
-                                        $monthName
-                                    ) ?>
-                                </option>
-
-                            <?php endforeach; ?>
-
-                        </select>
-
-                    </div>
-
-
-                    <!-- BUTTONS -->
-
-                    <div class="records-filter-actions">
-
-                        <button
-                            type="submit"
-                            class="records-button records-button-primary"
-                        >
-                            <span>⌕</span>
-                            Search
-                        </button>
-
-                        <a
-                            href="records.php"
-                            class="records-button records-button-reset"
-                        >
-                            Reset
-                        </a>
-
-                    </div>
-
 
                 </div>
 
 
-                <!-- ACTIVE FILTERS -->
+                <?php if ($isAdmin): ?>
 
-                <?php if ($hasFilters): ?>
+                    <div class="rec-field">
 
-                    <div class="records-active-filters">
+                        <label for="submitted_by">
+                            Submitted by
+                        </label>
 
-                        <span class="records-active-label">
-                            Active filters:
-                        </span>
+                        <select id="submitted_by" name="submitted_by" class="rec-control">
 
+                            <option value="">All users</option>
 
-                        <?php if ($search !== ''): ?>
+                            <?php foreach (['admin' => 'Administrators', 'staff' => 'Staff'] as $roleKey => $roleGroup): ?>
 
-                            <span class="records-filter-chip">
+                                <optgroup label="<?= $roleGroup ?>">
 
-                                Search:
-                                <?= recordsEscape($search) ?>
+                                    <?php foreach ($staffUsers as $staff): ?>
 
-                            </span>
+                                        <?php if (($staff['role'] ?? 'staff') !== $roleKey) { continue; } ?>
 
-                        <?php endif; ?>
+                                        <option
+                                            value="<?= (int) $staff['id'] ?>"
+                                            <?= $selectedUserId === (int) $staff['id'] ? 'selected' : '' ?>
+                                        >
+                                            <?= recordsEscape($staff['full_name']) ?><?= (int) $staff['id'] === $currentUserId ? ' (you)' : '' ?>
+                                        </option>
 
+                                    <?php endforeach; ?>
 
-                        <?php if (
-                            $selectedStaffName !== ''
-                        ): ?>
+                                </optgroup>
 
-                            <span
-                                class="
-                                    records-filter-chip
-                                    records-filter-chip-red
-                                "
-                            >
+                            <?php endforeach; ?>
 
-                                Staff:
-                                <?= recordsEscape(
-                                    $selectedStaffName
-                                ) ?>
-
-                            </span>
-
-                        <?php endif; ?>
-
-
-                        <?php if ($filterYear > 0): ?>
-
-                            <span class="records-filter-chip">
-
-                                Year:
-                                <?= (int) $filterYear ?>
-
-                            </span>
-
-                        <?php endif; ?>
-
-
-                        <?php if ($filterMonth > 0): ?>
-
-                            <span
-                                class="
-                                    records-filter-chip
-                                    records-filter-chip-gold
-                                "
-                            >
-
-                                Month:
-                                <?= recordsEscape(
-                                    $months[$filterMonth]
-                                ) ?>
-
-                            </span>
-
-                        <?php endif; ?>
-
+                        </select>
 
                     </div>
 
                 <?php endif; ?>
 
 
-            </form>
+                <div class="rec-field">
 
-        </div>
+                    <label for="records-year">
+                        Year
+                    </label>
+
+                    <select id="records-year" name="year" class="rec-control">
+
+                        <option value="">All years</option>
+
+                        <?php foreach ($availableYears as $year): ?>
+
+                            <option
+                                value="<?= (int) $year ?>"
+                                <?= $filterYear === (int) $year ? 'selected' : '' ?>
+                            >
+                                <?= (int) $year ?>
+                            </option>
+
+                        <?php endforeach; ?>
+
+                    </select>
+
+                </div>
+
+
+                <div class="rec-field">
+
+                    <label for="records-month">
+                        Month
+                    </label>
+
+                    <select id="records-month" name="month" class="rec-control">
+
+                        <option value="">All months</option>
+
+                        <?php foreach ($months as $monthNumber => $monthName): ?>
+
+                            <option
+                                value="<?= $monthNumber ?>"
+                                <?= $filterMonth === $monthNumber ? 'selected' : '' ?>
+                            >
+                                <?= recordsEscape($monthName) ?>
+                            </option>
+
+                        <?php endforeach; ?>
+
+                    </select>
+
+                </div>
+
+
+                <div class="rec-filter-actions">
+
+                    <button type="submit" class="rec-button rec-button-primary">
+                        Search
+                    </button>
+
+                    <?php if ($hasFilters): ?>
+                        <a href="records.php" class="rec-button rec-button-quiet">
+                            Reset
+                        </a>
+                    <?php endif; ?>
+
+                </div>
+
+            </div>
+
+
+            <?php if ($hasFilters): ?>
+
+                <div class="rec-active">
+
+                    <span>Showing results for</span>
+
+                    <?php if ($search !== ''): ?>
+                        <span class="rec-chip">&ldquo;<?= recordsEscape($search) ?>&rdquo;</span>
+                    <?php endif; ?>
+
+                    <?php if ($selectedStaffName !== ''): ?>
+                        <span class="rec-chip"><?= recordsEscape($selectedStaffName) ?></span>
+                    <?php endif; ?>
+
+                    <?php if ($filterMonth > 0): ?>
+                        <span class="rec-chip"><?= recordsEscape($months[$filterMonth]) ?></span>
+                    <?php endif; ?>
+
+                    <?php if ($filterYear > 0): ?>
+                        <span class="rec-chip"><?= (int) $filterYear ?></span>
+                    <?php endif; ?>
+
+                    <a href="records.php" class="rec-clear">Clear filters</a>
+
+                </div>
+
+            <?php endif; ?>
+
+        </form>
 
     </section>
 
@@ -2531,476 +1607,165 @@ require_once __DIR__ . '/../includes/header.php';
          RESULTS
          ============================================================ -->
 
-    <section class="records-results">
+    <section class="rec-panel rec-results" aria-labelledby="rec-results-title">
 
-
-        <div class="records-results-header">
+        <div class="rec-results-head">
 
             <div>
 
-                <h2 class="records-results-title">
-                    Registration Records
+                <h2 id="rec-results-title">
+                    Registration records
                 </h2>
 
-                <p class="records-results-subtitle">
-
-                    <?php if (
-                        $selectedStaffName !== ''
-                    ): ?>
-
-                        Showing submissions by
-                        <strong>
-                            <?= recordsEscape(
-                                $selectedStaffName
-                            ) ?>
-                        </strong>.
-
+                <p>
+                    <?php if ($selectedStaffName !== ''): ?>
+                        Submitted by <?= recordsEscape($selectedStaffName) ?>, newest first.
                     <?php elseif (!$isAdmin): ?>
-
-                        Showing records submitted by you.
-
+                        Submitted by you, newest first.
                     <?php else: ?>
-
-                        Showing all submitted records.
-
+                        All users, newest first.
                     <?php endif; ?>
-
                 </p>
 
             </div>
 
-
-            <div class="records-results-count">
-
-                <?= number_format($totalFiltered) ?>
-
-                <?= $totalFiltered === 1
-                    ? 'record'
-                    : 'records'
-                ?>
-
-            </div>
+            <span class="rec-total">
+                <strong><?= number_format($totalFiltered) ?></strong>
+                <?= $totalFiltered === 1 ? 'record' : 'records' ?>
+            </span>
 
         </div>
 
 
         <?php if (!empty($records)): ?>
 
+            <div class="rec-table-wrap">
 
-            <!-- ====================================================
-                 TABLE
-                 ==================================================== -->
-
-            <div class="records-table-wrap">
-
-                <table class="records-table">
+                <table class="rec-table">
 
                     <thead>
-
                         <tr>
-
-                            <th>
-                                Application
-                            </th>
-
-                            <th>
-                                Organization
-                            </th>
-
-                            <th>
-                                PBO Number
-                            </th>
-
-                            <th>
-                                Type
-                            </th>
-
-                            <th>
-                                Submitted By
-                            </th>
-
-                            <th>
-                                Submitted
-                            </th>
-
-                            <th class="records-action">
-                                Action
-                            </th>
-
+                            <th scope="col">Organization</th>
+                            <th scope="col">Reference</th>
+                            <th scope="col">PBO number</th>
+                            <th scope="col">Type</th>
+                            <th scope="col">Submitted by</th>
+                            <th scope="col">Submitted on</th>
+                            <th scope="col"><span class="rec-sr">Actions</span></th>
                         </tr>
-
                     </thead>
-
 
                     <tbody>
 
+                        <?php foreach ($records as $record): ?>
 
-                    <?php foreach (
-                        $records
-                        as $record
-                    ): ?>
+                            <?php
 
+                            $submitterName = trim((string) ($record['submitted_by_name'] ?? ''));
 
-                        <?php
+                            if ($submitterName === '') {
+                                $submitterName = 'Unknown user';
+                            }
 
-                        $submitterName =
-                            trim(
-                                (string) (
-                                    $record[
-                                        'submitted_by_name'
-                                    ] ?? ''
-                                )
-                            );
+                            $submitterUsername = trim((string) ($record['submitted_by_username'] ?? ''));
 
-                        if (
-                            $submitterName === ''
-                        ) {
-                            $submitterName =
-                                'Unknown User';
-                        }
+                            $registrationType = strtolower((string) ($record['registration_type'] ?? ''));
 
-                        $submitterUsername =
-                            trim(
-                                (string) (
-                                    $record[
-                                        'submitted_by_username'
-                                    ] ?? ''
-                                )
-                            );
+                            $viewUrl = 'view.php?id=' . (int) $record['id'];
 
-                        $submitterInitials =
-                            recordsInitials(
-                                $submitterName
-                            );
+                            ?>
 
-                        $registrationType =
-                            strtolower(
-                                (string) (
-                                    $record[
-                                        'registration_type'
-                                    ] ?? ''
-                                )
-                            );
+                            <tr>
 
-                        ?>
+                                <td class="rec-org">
 
+                                    <a href="<?= recordsEscape($viewUrl) ?>">
+                                        <?= recordsEscape($record['pbo_name']) ?>
+                                    </a>
 
-                        <tr>
+                                    <?php if (!empty($record['registration_date'])): ?>
+                                        <span class="rec-sub">
+                                            Registered <?= recordsEscape(recordsDate($record['registration_date'])) ?>
+                                        </span>
+                                    <?php endif; ?>
 
+                                </td>
 
-                            <!-- APPLICATION -->
-
-                            <td>
-
-                                <div class="records-reference">
-
-                                    <span
-                                        class="
-                                            records-reference-code
-                                        "
-                                    >
-                                        <?= recordsEscape(
-                                            $record[
-                                                'application_reference'
-                                            ]
-                                        ) ?>
+                                <td>
+                                    <span class="rec-ref">
+                                        <?= recordsEscape($record['application_reference']) ?>
                                     </span>
+                                </td>
 
-                                    <span
-                                        class="
-                                            records-reference-id
-                                        "
-                                    >
-                                        Record #
-                                        <?= (int) $record['id'] ?>
+                                <td>
+
+                                    <?php if (!empty($record['pbo_registration_number'])): ?>
+
+                                        <span class="rec-number">
+                                            <?= recordsEscape($record['pbo_registration_number']) ?>
+                                        </span>
+
+                                    <?php else: ?>
+
+                                        <span class="rec-number is-empty">
+                                            Not assigned
+                                        </span>
+
+                                    <?php endif; ?>
+
+                                </td>
+
+                                <td>
+                                    <span class="rec-type rec-type-<?= $registrationType === 'international' ? 'international' : 'national' ?>">
+                                        <?= $registrationType === 'international' ? 'International' : 'National' ?>
                                     </span>
+                                </td>
 
-                                </div>
+                                <td>
 
-                            </td>
+                                    <div class="rec-person">
 
-
-                            <!-- ORGANIZATION -->
-
-                            <td>
-
-                                <div
-                                    class="
-                                        records-organization
-                                    "
-                                >
-
-                                    <div
-                                        class="
-                                            records-organization-name
-                                        "
-                                    >
-                                        <?= recordsEscape(
-                                            $record['pbo_name']
-                                        ) ?>
-                                    </div>
-
-
-                                    <div
-                                        class="
-                                            records-organization-meta
-                                        "
-                                    >
+                                        <span class="rec-avatar" aria-hidden="true">
+                                            <?= recordsEscape(recordsInitials($submitterName)) ?>
+                                        </span>
 
                                         <span>
-                                            Registration application
+                                            <strong><?= recordsEscape($submitterName) ?></strong>
+
+                                            <?php if ($submitterUsername !== ''): ?>
+                                                <span class="rec-sub">
+                                                    @<?= recordsEscape($submitterUsername) ?><?= ($record['submitted_by_role'] ?? '') === 'admin' ? ' &middot; Administrator' : '' ?>
+                                                </span>
+                                            <?php endif; ?>
                                         </span>
 
-
-                                        <?php if (
-                                            !empty(
-                                                $record[
-                                                    'registration_date'
-                                                ]
-                                            )
-                                        ): ?>
-
-                                            <span>
-                                                •
-                                            </span>
-
-                                            <span>
-
-                                                <?= recordsEscape(
-                                                    date(
-                                                        'd M Y',
-                                                        strtotime(
-                                                            $record[
-                                                                'registration_date'
-                                                            ]
-                                                        )
-                                                    )
-                                                ) ?>
-
-                                            </span>
-
-                                        <?php endif; ?>
-
                                     </div>
 
-                                </div>
+                                </td>
 
-                            </td>
+                                <td class="rec-date">
 
+                                    <?= recordsEscape(recordsDate($record['submitted_at'])) ?>
 
-                            <!-- PBO NUMBER -->
-
-                            <td>
-
-                                <?php if (
-                                    !empty(
-                                        $record[
-                                            'pbo_registration_number'
-                                        ]
-                                    )
-                                ): ?>
-
-                                    <span
-                                        class="
-                                            records-registration-number
-                                        "
-                                    >
-                                        <?= recordsEscape(
-                                            $record[
-                                                'pbo_registration_number'
-                                            ]
-                                        ) ?>
+                                    <span class="rec-sub">
+                                        <?= recordsEscape(recordsTime($record['submitted_at'])) ?>
                                     </span>
 
-                                <?php else: ?>
+                                </td>
 
-                                    <span
-                                        class="
-                                            records-registration-number
-                                            empty
-                                        "
+                                <td>
+                                    <a
+                                        href="<?= recordsEscape($viewUrl) ?>"
+                                        class="rec-view"
+                                        aria-label="View <?= recordsEscape($record['pbo_name']) ?>"
                                     >
-                                        Not assigned
-                                    </span>
+                                        View
+                                    </a>
+                                </td>
 
-                                <?php endif; ?>
+                            </tr>
 
-                            </td>
-
-
-                            <!-- TYPE -->
-
-                            <td>
-
-                                <?php if (
-                                    $registrationType
-                                    === 'international'
-                                ): ?>
-
-                                    <span
-                                        class="
-                                            records-type
-                                            records-type-international
-                                        "
-                                    >
-                                        International
-                                    </span>
-
-                                <?php else: ?>
-
-                                    <span
-                                        class="
-                                            records-type
-                                            records-type-national
-                                        "
-                                    >
-                                        National
-                                    </span>
-
-                                <?php endif; ?>
-
-                            </td>
-
-
-                            <!-- SUBMITTED BY -->
-
-                            <td class="records-submitted-by">
-
-                                <div class="records-submitter">
-
-
-                                    <div
-                                        class="
-                                            records-submitter-avatar
-                                        "
-                                    >
-                                        <?= recordsEscape(
-                                            $submitterInitials
-                                        ) ?>
-                                    </div>
-
-
-                                    <div
-                                        class="
-                                            records-submitter-details
-                                        "
-                                    >
-
-                                        <span
-                                            class="
-                                                records-submitter-name
-                                            "
-                                        >
-                                            <?= recordsEscape(
-                                                $submitterName
-                                            ) ?>
-                                        </span>
-
-
-                                        <?php if (
-                                            $submitterUsername
-                                            !== ''
-                                        ): ?>
-
-                                            <span
-                                                class="
-                                                    records-submitter-username
-                                                "
-                                            >
-                                                @<?= recordsEscape(
-                                                    $submitterUsername
-                                                ) ?>
-                                            </span>
-
-                                        <?php else: ?>
-
-                                            <span
-                                                class="
-                                                    records-submitter-username
-                                                "
-                                            >
-                                                Submitted user
-                                            </span>
-
-                                        <?php endif; ?>
-
-                                    </div>
-
-
-                                </div>
-
-                            </td>
-
-
-                            <!-- SUBMITTED DATE -->
-
-                            <td
-                                class="
-                                    records-submitted-date
-                                "
-                            >
-
-                                <div
-                                    class="
-                                        records-date-main
-                                    "
-                                >
-                                    <?= recordsEscape(
-                                        recordsDate(
-                                            $record[
-                                                'submitted_at'
-                                            ]
-                                        )
-                                    ) ?>
-                                </div>
-
-
-                                <span
-                                    class="
-                                        records-date-time
-                                    "
-                                >
-                                    <?= recordsEscape(
-                                        recordsTime(
-                                            $record[
-                                                'submitted_at'
-                                            ]
-                                        )
-                                    ) ?>
-                                </span>
-
-                            </td>
-
-
-                            <!-- VIEW -->
-
-                            <td class="records-action">
-
-                                <a
-                                    href="view.php?id=<?= (int) $record['id'] ?>"
-                                    class="records-view"
-                                >
-
-                                    <span
-                                        class="
-                                            records-view-icon
-                                        "
-                                    >
-                                        →
-                                    </span>
-
-                                    View
-
-                                </a>
-
-                            </td>
-
-
-                        </tr>
-
-
-                    <?php endforeach; ?>
-
+                        <?php endforeach; ?>
 
                     </tbody>
 
@@ -3009,256 +1774,61 @@ require_once __DIR__ . '/../includes/header.php';
             </div>
 
 
-            <!-- ====================================================
-                 PAGINATION
-                 ==================================================== -->
+            <?php if ($totalPages > 1): ?>
 
-            <?php if (
-                $totalPages > 1
-            ): ?>
+                <?php
+                $startPage = max(1, $page - 2);
+                $endPage = min($totalPages, $page + 2);
+                ?>
 
-                <div class="records-pagination">
+                <div class="rec-pagination">
 
-
-                    <div class="records-pagination-info">
-
+                    <span>
                         Showing
-
-                        <strong>
-                            <?= number_format(
-                                $offset + 1
-                            ) ?>
-                        </strong>
-
+                        <strong><?= number_format($offset + 1) ?></strong>
                         to
-
-                        <strong>
-                            <?= number_format(
-                                min(
-                                    $offset + $perPage,
-                                    $totalFiltered
-                                )
-                            ) ?>
-                        </strong>
-
+                        <strong><?= number_format(min($offset + $perPage, $totalFiltered)) ?></strong>
                         of
+                        <strong><?= number_format($totalFiltered) ?></strong>
+                    </span>
 
-                        <strong>
-                            <?= number_format(
-                                $totalFiltered
-                            ) ?>
-                        </strong>
-
-                        records
-
-                    </div>
-
-
-                    <nav
-                        class="
-                            records-pagination-links
-                        "
-                        aria-label="Pagination"
-                    >
-
-
-                        <!-- PREVIOUS -->
+                    <nav class="rec-pages" aria-label="Pagination">
 
                         <?php if ($page > 1): ?>
-
-                            <a
-                                href="<?= recordsEscape(
-                                    recordsPageUrl(
-                                        $page - 1,
-                                        $paginationParameters
-                                    )
-                                ) ?>"
-                                class="records-page-link"
-                                aria-label="Previous page"
-                            >
-                                ‹
-                            </a>
-
+                            <a class="rec-page" href="<?= recordsEscape(recordsPageUrl($page - 1, $paginationParameters)) ?>" aria-label="Previous page">&lsaquo;</a>
                         <?php else: ?>
-
-                            <span
-                                class="
-                                    records-page-link
-                                    disabled
-                                "
-                            >
-                                ‹
-                            </span>
-
+                            <span class="rec-page is-disabled" aria-hidden="true">&lsaquo;</span>
                         <?php endif; ?>
 
-
-                        <?php
-
-                        $startPage =
-                            max(
-                                1,
-                                $page - 2
-                            );
-
-                        $endPage =
-                            min(
-                                $totalPages,
-                                $page + 2
-                            );
-
-                        ?>
-
-
-                        <!-- FIRST PAGE -->
-
-                        <?php if (
-                            $startPage > 1
-                        ): ?>
-
-                            <a
-                                href="<?= recordsEscape(
-                                    recordsPageUrl(
-                                        1,
-                                        $paginationParameters
-                                    )
-                                ) ?>"
-                                class="records-page-link"
-                            >
-                                1
-                            </a>
-
-
-                            <?php if (
-                                $startPage > 2
-                            ): ?>
-
-                                <span
-                                    class="
-                                        records-page-dots
-                                    "
-                                >
-                                    …
-                                </span>
-
+                        <?php if ($startPage > 1): ?>
+                            <a class="rec-page" href="<?= recordsEscape(recordsPageUrl(1, $paginationParameters)) ?>">1</a>
+                            <?php if ($startPage > 2): ?>
+                                <span class="rec-dots">&hellip;</span>
                             <?php endif; ?>
-
                         <?php endif; ?>
 
+                        <?php for ($p = $startPage; $p <= $endPage; $p++): ?>
 
-                        <!-- PAGE NUMBERS -->
-
-                        <?php for (
-                            $p = $startPage;
-                            $p <= $endPage;
-                            $p++
-                        ): ?>
-
-
-                            <?php if (
-                                $p === $page
-                            ): ?>
-
-                                <span
-                                    class="
-                                        records-page-link
-                                        active
-                                    "
-                                >
-                                    <?= $p ?>
-                                </span>
-
+                            <?php if ($p === $page): ?>
+                                <span class="rec-page is-current" aria-current="page"><?= $p ?></span>
                             <?php else: ?>
-
-                                <a
-                                    href="<?= recordsEscape(
-                                        recordsPageUrl(
-                                            $p,
-                                            $paginationParameters
-                                        )
-                                    ) ?>"
-                                    class="records-page-link"
-                                >
-                                    <?= $p ?>
-                                </a>
-
+                                <a class="rec-page" href="<?= recordsEscape(recordsPageUrl($p, $paginationParameters)) ?>"><?= $p ?></a>
                             <?php endif; ?>
-
 
                         <?php endfor; ?>
 
-
-                        <!-- LAST PAGE -->
-
-                        <?php if (
-                            $endPage < $totalPages
-                        ): ?>
-
-
-                            <?php if (
-                                $endPage
-                                < $totalPages - 1
-                            ): ?>
-
-                                <span
-                                    class="
-                                        records-page-dots
-                                    "
-                                >
-                                    …
-                                </span>
-
+                        <?php if ($endPage < $totalPages): ?>
+                            <?php if ($endPage < $totalPages - 1): ?>
+                                <span class="rec-dots">&hellip;</span>
                             <?php endif; ?>
-
-
-                            <a
-                                href="<?= recordsEscape(
-                                    recordsPageUrl(
-                                        $totalPages,
-                                        $paginationParameters
-                                    )
-                                ) ?>"
-                                class="records-page-link"
-                            >
-                                <?= $totalPages ?>
-                            </a>
-
-
+                            <a class="rec-page" href="<?= recordsEscape(recordsPageUrl($totalPages, $paginationParameters)) ?>"><?= $totalPages ?></a>
                         <?php endif; ?>
 
-
-                        <!-- NEXT -->
-
-                        <?php if (
-                            $page < $totalPages
-                        ): ?>
-
-                            <a
-                                href="<?= recordsEscape(
-                                    recordsPageUrl(
-                                        $page + 1,
-                                        $paginationParameters
-                                    )
-                                ) ?>"
-                                class="records-page-link"
-                                aria-label="Next page"
-                            >
-                                ›
-                            </a>
-
+                        <?php if ($page < $totalPages): ?>
+                            <a class="rec-page" href="<?= recordsEscape(recordsPageUrl($page + 1, $paginationParameters)) ?>" aria-label="Next page">&rsaquo;</a>
                         <?php else: ?>
-
-                            <span
-                                class="
-                                    records-page-link
-                                    disabled
-                                "
-                            >
-                                ›
-                            </span>
-
+                            <span class="rec-page is-disabled" aria-hidden="true">&rsaquo;</span>
                         <?php endif; ?>
-
 
                     </nav>
 
@@ -3266,51 +1836,43 @@ require_once __DIR__ . '/../includes/header.php';
 
             <?php endif; ?>
 
-
         <?php else: ?>
 
+            <div class="rec-empty">
 
-            <!-- ====================================================
-                 EMPTY STATE
-                 ==================================================== -->
+                <?php if ($hasFilters): ?>
 
-            <div class="records-empty">
+                    <h3>No records match these filters</h3>
 
-                <div class="records-empty-icon">
-                    ⌕
-                </div>
+                    <p>
+                        Check the spelling of the organization name or reference,
+                        or widen the date range.
+                    </p>
 
-                <h3>
-                    No submitted records found
-                </h3>
+                    <a href="records.php" class="rec-button rec-button-quiet">
+                        Clear filters
+                    </a>
 
-                <p>
+                <?php else: ?>
 
-                    <?php if ($hasFilters): ?>
+                    <h3>No submitted records yet</h3>
 
-                        No submitted applications match the
-                        current search and filter criteria.
-                        Try changing the filters or reset them
-                        to view all available records.
+                    <p>
+                        Applications appear here once they are submitted from the
+                        review step.
+                    </p>
 
-                    <?php else: ?>
+                    <a href="/pbo-portal/applications/create.php" class="rec-button rec-button-primary">
+                        Start a new application
+                    </a>
 
-                        There are currently no submitted
-                        applications within your authorized
-                        access scope.
-
-                    <?php endif; ?>
-
-                </p>
+                <?php endif; ?>
 
             </div>
 
-
         <?php endif; ?>
 
-
     </section>
-
 
 </div>
 

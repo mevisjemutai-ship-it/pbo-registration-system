@@ -589,12 +589,46 @@ require_once __DIR__ . '/../includes/header.php';
 
                                         <!-- RESET PASSWORD -->
 
-                                        <a
-                                            href="/pbo-portal/admin/reset-password.php?id=<?= (int) $user['id'] ?>"
-                                            class="user-action reset-action"
+                                        <form
+                                            method="post"
+                                            action="/pbo-portal/admin/reset-password.php"
+                                            class="reset-user-form"
+                                            style="
+                                                display: inline;
+                                                margin: 0;
+                                            "
                                         >
-                                            Reset Password
-                                        </a>
+
+                                            <input
+                                                type="hidden"
+                                                name="csrf_token"
+                                                value="<?= htmlspecialchars(csrfToken()) ?>"
+                                            >
+
+                                            <input
+                                                type="hidden"
+                                                name="user_id"
+                                                value="<?= (int) $user['id'] ?>"
+                                            >
+
+                                            <input
+                                                type="hidden"
+                                                name="full_name"
+                                                value="<?= htmlspecialchars(
+                                                    (string) $user['full_name'],
+                                                    ENT_QUOTES | ENT_SUBSTITUTE,
+                                                    'UTF-8'
+                                                ) ?>"
+                                            >
+
+                                            <button
+                                                type="submit"
+                                                class="user-action reset-action"
+                                            >
+                                                Reset Password
+                                            </button>
+
+                                        </form>
 
 
                                         <!-- ENABLE / DISABLE -->
@@ -687,6 +721,44 @@ require_once __DIR__ . '/../includes/header.php';
 (function () {
 
     'use strict';
+
+
+    /*
+     * Confirm before resetting a password.
+     */
+    document
+        .querySelectorAll('.reset-user-form')
+        .forEach(function (form) {
+
+            form.addEventListener('submit', function (event) {
+
+                const nameField =
+                    form.querySelector('input[name="full_name"]');
+
+                const name =
+                    nameField ? nameField.value : 'this user';
+
+                const confirmed = window.confirm(
+                    'Reset the password for "' + name + '"?\n\n' +
+                    'Their password will become the temporary password ' +
+                    'field.123 and they must choose a new one at their ' +
+                    'next sign-in.'
+                );
+
+                if (!confirmed) {
+                    event.preventDefault();
+                    return;
+                }
+
+                const button =
+                    form.querySelector('button[type="submit"]');
+
+                if (button) {
+                    button.disabled = true;
+                    button.textContent = 'Resetting...';
+                }
+            });
+        });
 
 
     const forms =

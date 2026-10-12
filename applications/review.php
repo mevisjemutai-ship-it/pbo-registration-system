@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/application-validation.php';
 
 requireLogin();
 requirePasswordChanged();
@@ -478,6 +479,7 @@ $statement =
         "
         SELECT
             county,
+            city_town,
             sub_county,
             physical_address,
             postal_address,
@@ -488,6 +490,7 @@ $statement =
         FROM application_addresses
         WHERE application_id =
             :application_id
+        ORDER BY id DESC
         LIMIT 1
         "
     );
@@ -507,6 +510,7 @@ if (!$address) {
     $address = [
 
         'county' => '',
+        'city_town' => '',
         'sub_county' => '',
         'physical_address' => '',
         'postal_address' => '',
@@ -550,6 +554,7 @@ if (
             FROM application_international_details
             WHERE application_id =
                 :application_id
+            ORDER BY id DESC
             LIMIT 1
             "
         );
@@ -582,6 +587,70 @@ if (
         ];
     }
 }
+
+
+/*
+|--------------------------------------------------------------------------
+| Other areas of operation (national and international)
+|--------------------------------------------------------------------------
+|
+| One row per selected county. Office details are optional.
+|
+*/
+
+$statement =
+    $connection->prepare(
+        "
+        SELECT
+            county,
+            sub_county,
+            physical_address,
+            postal_address,
+            postal_code,
+            phone_number,
+            alternative_phone_number,
+            email
+        FROM application_operating_locations
+        WHERE application_id =
+            :application_id
+        ORDER BY county ASC
+        "
+    );
+
+$statement->execute([
+    ':application_id'
+        => $applicationId,
+]);
+
+$operatingLocations = [];
+
+foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $location) {
+    // One entry per county (newest wins if an old duplicate exists).
+    $operatingLocations[(string) $location['county']] = $location;
+}
+
+$operatingLocationDetailFields = [
+    'sub_county' => 'Sub-County',
+    'physical_address' => 'Physical Address',
+    'postal_address' => 'Postal Address',
+    'postal_code' => 'Postal Code',
+    'phone_number' => 'Phone Number',
+    'alternative_phone_number' => 'Alternative Phone Number',
+    'email' => 'Email',
+];
+
+$locationsWithOffices = array_filter(
+    $operatingLocations,
+    static function (array $location) use ($operatingLocationDetailFields): bool {
+        foreach (array_keys($operatingLocationDetailFields) as $field) {
+            if (hasValue($location[$field] ?? '')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+);
 
 
 /*
@@ -762,178 +831,19 @@ $completionErrors = [];
 
 /*
 |--------------------------------------------------------------------------
-| Organization
-|--------------------------------------------------------------------------
-*/
-
-if (
-    !hasValue(
-        $application['pbo_name']
-    )
-) {
-
-    $completionErrors[] =
-        'Name of PBO is missing.';
-}
-
-
-if (
-    !hasValue(
-        $application[
-            'pbo_registration_number'
-        ]
-    )
-) {
-
-    $completionErrors[] =
-        'PBO Registration Number is missing.';
-}
-
-
-if (
-    !hasValue(
-        $application[
-            'registration_date'
-        ]
-    )
-) {
-
-    $completionErrors[] =
-        'Date of Registration is missing.';
-}
-
-
-if (
-    !in_array(
-        $application[
-            'registration_type'
-        ],
-        [
-            'national',
-            'international',
-        ],
-        true
-    )
-) {
-
-    $completionErrors[] =
-        'Type of Organization is missing or invalid.';
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Required address fields
+| Organization (headquarters, international, other areas of operation)
 |--------------------------------------------------------------------------
 |
-| Sub-County, Postal Code and Alternative Phone are optional.
+| Shared with the Organization page so both always apply the same rules.
+| Office details for other areas of operation are optional.
 |
 */
-
-$requiredAddressFields = [
-
-    'county'
-        => 'County',
-
-    'physical_address'
-        => 'Physical Address',
-
-    'postal_address'
-        => 'Postal Address',
-
-    'phone_number'
-        => 'Organization Phone Number',
-
-    'email'
-        => 'Organization Email',
-];
-
 
 foreach (
-    $requiredAddressFields
-    as $field => $label
+    pboOrganizationSectionErrors($connection, $applicationId)
+    as $organizationError
 ) {
-
-    if (
-        !hasValue(
-            $address[$field] ?? ''
-        )
-    ) {
-
-        $completionErrors[] =
-            $label .
-            ' is missing.';
-    }
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| International details
-|--------------------------------------------------------------------------
-*/
-
-if (
-    $application[
-        'registration_type'
-    ] === 'international'
-) {
-
-    $requiredInternationalFields = [
-
-        'parent_organization_name'
-            => 'Parent Organization Name',
-
-        'country_of_origin'
-            => 'Parent Organization Country',
-
-        'registration_number'
-            => 'Parent Organization Registration Number',
-
-        'parent_physical_address'
-            => 'Parent Organization Physical Address',
-
-        'parent_postal_address'
-            => 'Parent Organization Postal Address',
-
-        'parent_postal_code'
-            => 'Parent Organization Postal Code',
-
-        'parent_phone_number'
-            => 'Parent Organization Phone Number',
-
-        'parent_email'
-            => 'Parent Organization Email',
-
-        'contact_person_name'
-            => 'Parent Organization Contact Person',
-
-        'contact_person_phone'
-            => 'Contact Person Phone Number',
-
-        'contact_person_email'
-            => 'Contact Person Email',
-    ];
-
-
-    foreach (
-        $requiredInternationalFields
-        as $field => $label
-    ) {
-
-        if (
-            !hasValue(
-                $internationalDetails[
-                    $field
-                ] ?? ''
-            )
-        ) {
-
-            $completionErrors[] =
-                $label .
-                ' is missing.';
-        }
-    }
+    $completionErrors[] = $organizationError;
 }
 
 
@@ -2125,6 +2035,34 @@ require_once __DIR__ .
                     <?php if (
                         hasValue(
                             $address[
+                                'city_town'
+                            ] ?? ''
+                        )
+                    ): ?>
+
+                        <div class="review-field">
+
+                            <span class="review-field-label">
+                                City / Town
+                            </span>
+
+                            <span class="review-field-value">
+                                <?= e(
+                                    (string)
+                                    $address[
+                                        'city_town'
+                                    ]
+                                ) ?>
+                            </span>
+
+                        </div>
+
+                    <?php endif; ?>
+
+
+                    <?php if (
+                        hasValue(
+                            $address[
                                 'sub_county'
                             ] ?? ''
                         )
@@ -2220,7 +2158,7 @@ require_once __DIR__ .
                             Phone Number
                         </span>
 
-                        <                        <span class="review-field-value">
+                        <span class="review-field-value">
                             <?= e(
                                 (string)
                                 $address[
@@ -2274,6 +2212,136 @@ require_once __DIR__ .
                         </span>
 
                     </div>
+
+                </div>
+
+
+                <!-- Other areas of operation -->
+
+                <div class="optional-block">
+
+                    <h3 class="optional-block-title">
+                        Other Areas of Operation
+                    </h3>
+
+                    <?php if ($operatingLocations === []): ?>
+
+                        <span class="text-muted">
+                            No other areas of operation.
+                        </span>
+
+                    <?php else: ?>
+
+                        <p
+                            style="
+                                margin: 0 0 10px;
+                                color: var(--text-secondary);
+                                font-size: 11px;
+                            "
+                        >
+                            <?= count($operatingLocations) ?>
+                            <?= count($operatingLocations) === 1 ? 'county' : 'counties' ?>
+                            selected<?= $locationsWithOffices !== []
+                                ? ', ' . count($locationsWithOffices) . ' with office details'
+                                : '' ?>.
+                        </p>
+
+                        <div class="review-tags">
+
+                            <?php foreach (
+                                $operatingLocations
+                                as $countyName => $location
+                            ): ?>
+
+                                <span class="review-tag">
+
+                                    <span class="review-tag-check">
+                                        &#10003;
+                                    </span>
+
+                                    <?= e((string) $countyName) ?>
+
+                                </span>
+
+                            <?php endforeach; ?>
+
+                        </div>
+
+
+                        <?php if ($locationsWithOffices !== []): ?>
+
+                            <div
+                                class="official-grid"
+                                style="margin-top: 16px;"
+                            >
+
+                                <?php foreach (
+                                    $locationsWithOffices
+                                    as $countyName => $location
+                                ): ?>
+
+                                    <article class="official-card">
+
+                                        <div class="official-card-header">
+
+                                            <span>
+                                                Office details
+                                            </span>
+
+                                            <h3>
+                                                <?= e((string) $countyName) ?>
+                                            </h3>
+
+                                        </div>
+
+
+                                        <div class="official-card-body">
+
+                                            <div class="review-grid">
+
+                                                <?php foreach (
+                                                    $operatingLocationDetailFields
+                                                    as $field => $label
+                                                ): ?>
+
+                                                    <?php if (
+                                                        hasValue(
+                                                            $location[$field] ?? ''
+                                                        )
+                                                    ): ?>
+
+                                                        <div class="review-field">
+
+                                                            <span class="review-field-label">
+                                                                <?= e($label) ?>
+                                                            </span>
+
+                                                            <span class="review-field-value">
+                                                                <?= e(
+                                                                    (string)
+                                                                    $location[$field]
+                                                                ) ?>
+                                                            </span>
+
+                                                        </div>
+
+                                                    <?php endif; ?>
+
+                                                <?php endforeach; ?>
+
+                                            </div>
+
+                                        </div>
+
+                                    </article>
+
+                                <?php endforeach; ?>
+
+                            </div>
+
+                        <?php endif; ?>
+
+                    <?php endif; ?>
 
                 </div>
 
@@ -3331,7 +3399,8 @@ require_once __DIR__ .
 
                                             <div class="review-field">
 
-                                                <span class="                                                    ID / Passport
+                                                <span class="review-field-label">
+                                                    ID / Passport
                                                 </span>
 
                                                 <span class="review-field-value">

@@ -12,6 +12,7 @@ $error = '';
 
 $fullName = '';
 $username = '';
+$email = '';
 $role = 'staff';
 
 
@@ -32,6 +33,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     );
 
     $role = $_POST['role'] ?? 'staff';
+
+    /*
+     * Email is only collected for administrators (used for sign-in
+     * codes and "Forgot password"). Staff accounts have no email.
+     */
+    $email = strtolower(
+        trim((string) ($_POST['email'] ?? ''))
+    );
+
+    if ($role !== 'admin') {
+        $email = '';
+    }
 
 
     /*
@@ -72,6 +85,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error =
             'Select a valid system role.';
 
+    } elseif ($role === 'admin' && $email === '') {
+
+        $error =
+            'Enter an email address for the administrator. '
+            . 'It is used for sign-in codes and password resets.';
+
+    } elseif (
+        $role === 'admin'
+        && (
+            strlen($email) > 190
+            || filter_var($email, FILTER_VALIDATE_EMAIL) === false
+        )
+    ) {
+
+        $error =
+            'Enter a valid email address for the administrator.';
+
     } else {
 
         /*
@@ -92,10 +122,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ]);
 
 
+        $emailInUse = false;
+
+        if ($email !== '') {
+
+            $emailCheck = $pdo->prepare(
+                'SELECT id
+                 FROM users
+                 WHERE email = :email
+                 LIMIT 1'
+            );
+
+            $emailCheck->execute([
+                'email' => $email
+            ]);
+
+            $emailInUse = (bool) $emailCheck->fetch();
+        }
+
+
         if ($check->fetch()) {
 
             $error =
                 'That username is already in use.';
+
+        } elseif ($emailInUse) {
+
+            $error =
+                'That email address is already used by another account.';
 
         } else {
 
@@ -125,6 +179,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'INSERT INTO users (
                     username,
                     full_name,
+                    email,
                     password_hash,
                     role,
                     is_active,
@@ -133,6 +188,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 VALUES (
                     :username,
                     :full_name,
+                    :email,
                     :password_hash,
                     :role,
                     TRUE,
@@ -143,6 +199,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute([
                 'username' => $username,
                 'full_name' => $fullName,
+                'email' => $email !== '' ? $email : null,
                 'password_hash' => $passwordHash,
                 'role' => $role
             ]);
@@ -456,6 +513,47 @@ require_once __DIR__ . '/../includes/header.php';
 
 
                 <!-- ==================================================
+                     ADMINISTRATOR EMAIL (only shown for Administrator)
+                     ================================================== -->
+
+                <div
+                    class="form-group"
+                    id="admin-email-group"
+                    <?= $role === 'admin' ? '' : 'hidden' ?>
+                >
+
+                    <label for="email">
+
+                        Administrator Email
+
+                        <span class="required">
+                            *
+                        </span>
+
+                    </label>
+
+
+                    <input
+                        id="email"
+                        type="email"
+                        name="email"
+                        value="<?= htmlspecialchars($email) ?>"
+                        placeholder="e.g. jkamau@example.com"
+                        maxlength="190"
+                        autocomplete="off"
+                        <?= $role === 'admin' ? 'required' : 'disabled' ?>
+                    >
+
+
+                    <span class="form-help">
+                        Sign-in codes and password reset codes
+                        are sent to this address.
+                    </span>
+
+                </div>
+
+
+                <!-- ==================================================
                      FORM ACTIONS
                      ================================================== -->
 
@@ -622,12 +720,19 @@ require_once __DIR__ . '/../includes/header.php';
 
             <div class="account-security-note">
 
-                If the user later forgets their password,
+                If a staff member later forgets their password,
                 an administrator must reset the account.
                 The password will return to
                 <strong>field.123</strong> and the user
                 will be required to create a new password
                 at their next login.
+
+                <br><br>
+
+                Administrators reset their own password with
+                <strong>Forgot password?</strong> on the sign-in
+                page, and confirm new browsers with a code sent
+                to their email.
 
             </div>
 
@@ -676,7 +781,41 @@ roleChoices.forEach((choice) => {
 });
 
 
+/*
+ * Show the email field only when Administrator is selected.
+ */
+const adminEmailGroup =
+    document.getElementById('admin-email-group');
+
+const adminEmailInput =
+    document.getElementById('email');
+
+
+function updateAdminEmail() {
+
+    const adminSelected =
+        document.getElementById('role_admin').checked;
+
+    adminEmailGroup.hidden = !adminSelected;
+    adminEmailInput.disabled = !adminSelected;
+    adminEmailInput.required = adminSelected;
+}
+
+
+document
+    .querySelectorAll('input[name="role"]')
+    .forEach((radio) => {
+
+        radio.addEventListener('change', () => {
+            updateRoleCards();
+            updateAdminEmail();
+        });
+
+    });
+
+
 updateRoleCards();
+updateAdminEmail();
 
 </script>
 

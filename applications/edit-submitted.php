@@ -360,9 +360,9 @@ if (!hasValidAdminEditAuthorization($connection, $applicationId)) {
 */
 
 $stmt = $connection->prepare(
-    'SELECT
+    "SELECT
         county,
-        town,
+        COALESCE(NULLIF(city_town, ''), town) AS town,
         sub_county,
         physical_address,
         postal_address,
@@ -372,7 +372,8 @@ $stmt = $connection->prepare(
         email
      FROM application_addresses
      WHERE application_id = :id
-     LIMIT 1'
+     ORDER BY id DESC
+     LIMIT 1"
 );
 
 $stmt->execute([
@@ -436,6 +437,7 @@ $stmt = $connection->prepare(
         contact_person_email
      FROM application_international_details
      WHERE application_id = :id
+     ORDER BY id DESC
      LIMIT 1'
 );
 
@@ -795,43 +797,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 : count($normalizedOperatingLocations) + 1;
 
         /*
-         * Once a location has been started, its core fields
-         * must be completed.
+         * A location needs its county. Office details are optional:
+         * many PBOs work in a county without having an office there.
          */
         if ($normalized['county'] === '') {
 
             $errors[] =
                 "Operating location {$locationNumber}: County is required.";
-        }
-
-        if ($normalized['sub_county'] === '') {
-
-            $errors[] =
-                "Operating location {$locationNumber}: Sub-County is required.";
-        }
-
-        if ($normalized['physical_address'] === '') {
-
-            $errors[] =
-                "Operating location {$locationNumber}: Physical Address is required.";
-        }
-
-        if ($normalized['postal_address'] === '') {
-
-            $errors[] =
-                "Operating location {$locationNumber}: Postal Address is required.";
-        }
-
-        if ($normalized['postal_code'] === '') {
-
-            $errors[] =
-                "Operating location {$locationNumber}: Postal Code is required.";
-        }
-
-        if ($normalized['phone_number'] === '') {
-
-            $errors[] =
-                "Operating location {$locationNumber}: Organization Phone Number is required.";
         }
 
         if (
@@ -1181,20 +1153,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'county' =>
                 'County',
 
-            'sub_county' =>
-                'Sub-County',
-
             'physical_address' =>
                 'Physical Address',
 
             'postal_address' =>
                 'Postal Address',
 
-            'postal_code' =>
-                'Postal Code',
-
             'phone_number' =>
                 'Organization Phone Number',
+
+            'email' =>
+                'Organization Email',
         ] as $field => $label
     ) {
 
@@ -1659,11 +1628,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
              */
 
             $stmt = $connection->prepare(
+                'DELETE FROM application_addresses
+                 WHERE application_id = :id'
+            );
+
+            $stmt->execute([
+                'id' => $applicationId
+            ]);
+
+            $stmt = $connection->prepare(
                 'INSERT INTO application_addresses
                 (
                     application_id,
                     county,
                     town,
+                    city_town,
                     sub_county,
                     physical_address,
                     postal_address,
@@ -1677,6 +1656,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     :id,
                     :county,
                     :town,
+                    :city_town,
                     :sub_county,
                     :physical_address,
                     :postal_address,
@@ -1684,55 +1664,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     :phone_number,
                     :alternative_phone_number,
                     :email
-                )
-                ON DUPLICATE KEY UPDATE
-                    county = VALUES(county),
-                    town = VALUES(town),
-                    sub_county = VALUES(sub_county),
-                    physical_address = VALUES(physical_address),
-                    postal_address = VALUES(postal_address),
-                    postal_code = VALUES(postal_code),
-                    phone_number = VALUES(phone_number),
-                    alternative_phone_number = VALUES(alternative_phone_number),
-                    email = VALUES(email)'
+                )'
             );
 
+            $town = $form['town'] !== '' ? $form['town'] : null;
+
             $stmt->execute([
-                'id' =>
-                    $applicationId,
-
-                'county' =>
-                    $form['county'],
-
-                'town' =>
-                    $form['town'] !== ''
-                        ? $form['town']
-                        : null,
-
-                'sub_county' =>
-                    $form['sub_county'],
-
-                'physical_address' =>
-                    $form['physical_address'],
-
-                'postal_address' =>
-                    $form['postal_address'],
-
-                'postal_code' =>
-                    $form['postal_code'],
-
-                'phone_number' =>
-                    $form['phone_number'],
-
+                'id' => $applicationId,
+                'county' => $form['county'],
+                'town' => $town,
+                'city_town' => $town,
+                'sub_county' => $form['sub_county'] !== '' ? $form['sub_county'] : null,
+                'physical_address' => $form['physical_address'],
+                'postal_address' => $form['postal_address'],
+                'postal_code' => $form['postal_code'] !== '' ? $form['postal_code'] : null,
+                'phone_number' => $form['phone_number'],
                 'alternative_phone_number' =>
                     $form['alternative_phone_number'] !== ''
                         ? $form['alternative_phone_number']
                         : null,
-
-                'email' =>
-                    $form['email'] !== ''
-                        ? $form['email']
-                        : null,
+                'email' => $form['email'] !== '' ? $form['email'] : null,
             ]);
 
             /*
@@ -1811,10 +1762,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 ? $location['alternative_phone_number']
                                 : null,
 
+                        /*
+                         * Blank office details are stored as empty text,
+                         * the same way the application wizard saves them.
+                         */
                         'email' =>
-                            $location['email'] !== ''
-                                ? $location['email']
-                                : null,
+                            $location['email'],
 
                         'postal_address' =>
                             $location['postal_address'],
@@ -1834,6 +1787,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (
                 $form['registration_type'] === 'international'
             ) {
+
+                $stmt = $connection->prepare(
+                    'DELETE FROM application_international_details
+                     WHERE application_id = :id'
+                );
+
+                $stmt->execute([
+                    'id' => $applicationId
+                ]);
 
                 $stmt = $connection->prepare(
                     'INSERT INTO application_international_details
@@ -1865,30 +1827,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         :contact_person_name,
                         :contact_person_phone,
                         :contact_person_email
-                    )
-                    ON DUPLICATE KEY UPDATE
-                        parent_organization_name =
-                            VALUES(parent_organization_name),
-                        country_of_origin =
-                            VALUES(country_of_origin),
-                        registration_number =
-                            VALUES(registration_number),
-                        parent_physical_address =
-                            VALUES(parent_physical_address),
-                        parent_postal_address =
-                            VALUES(parent_postal_address),
-                        parent_postal_code =
-                            VALUES(parent_postal_code),
-                        parent_phone_number =
-                            VALUES(parent_phone_number),
-                        parent_email =
-                            VALUES(parent_email),
-                        contact_person_name =
-                            VALUES(contact_person_name),
-                        contact_person_phone =
-                            VALUES(contact_person_phone),
-                        contact_person_email =
-                            VALUES(contact_person_email)'
+                    )'
                 );
 
                 $stmt->execute([
@@ -2313,12 +2252,22 @@ require_once __DIR__ . '/../includes/header.php';
 <style>
 /* ==========================================================
    SUBMITTED RECORD EDITOR
+   Matches the dashboard and records pages and uses the shared
+   colour variables from assets/css/style.css.
    ========================================================== */
 
 .submitted-editor {
-    max-width: 1240px;
+    --ed-ink: var(--heading, #15283b);
+    --ed-muted: #5f6b78;
+    --ed-line: #e2e6eb;
+    --ed-field: #c9d1da;
+    --ed-radius: 12px;
+
+    width: 100%;
+    max-width: 1180px;
     margin: 0 auto;
-    padding: 28px 18px 72px;
+    padding: 0 0 96px;
+    color: var(--text, #26313d);
 }
 
 .submitted-editor *,
@@ -2327,13 +2276,174 @@ require_once __DIR__ . '/../includes/header.php';
     box-sizing: border-box;
 }
 
+.submitted-editor h1,
+.submitted-editor h2,
+.submitted-editor p {
+    margin: 0;
+}
+
+
+/* ---------- Layout helpers the page markup uses ---------- */
+
+.submitted-editor .row {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 18px 20px;
+}
+
+.submitted-editor .row > * {
+    grid-column: span 12;
+    min-width: 0;
+}
+
+.submitted-editor .row > .col-md-4 { grid-column: span 4; }
+.submitted-editor .row > .col-md-6 { grid-column: span 6; }
+.submitted-editor .row > .col-md-8 { grid-column: span 8; }
+
+.submitted-editor .d-flex { display: flex; }
+.submitted-editor .flex-wrap { flex-wrap: wrap; }
+.submitted-editor .gap-2 { gap: 8px; }
+.submitted-editor .mb-0 { margin-bottom: 0 !important; }
+.submitted-editor .mb-2 { margin-bottom: 8px !important; }
+.submitted-editor .mb-3 { margin-bottom: 14px !important; }
+.submitted-editor .mt-1 { margin-top: 4px !important; }
+.submitted-editor .mt-3 { margin-top: 14px !important; }
+.submitted-editor .mt-4 { margin-top: 22px !important; }
+.submitted-editor .fw-bold { font-weight: 700; }
+.submitted-editor .fw-semibold { font-weight: 600; }
+.submitted-editor .fw-normal { font-weight: 400; }
+.submitted-editor .small { font-size: 13px; }
+.submitted-editor .text-danger { color: var(--red, #b5222a); }
+.submitted-editor .text-muted { color: var(--ed-muted); }
+
+
+/* ---------- Form controls ---------- */
+
+.submitted-editor .form-control,
+.submitted-editor .form-select {
+    display: block;
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 12px;
+    border: 1px solid var(--ed-field);
+    border-radius: 8px;
+    background-color: #ffffff;
+    color: var(--ed-ink);
+    font-size: 14.5px;
+    box-shadow: none;
+}
+
+.submitted-editor .form-select {
+    padding-right: 36px;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%235f6b78' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+    background-position: right 12px center;
+    background-repeat: no-repeat;
+    background-size: 14px;
+}
+
+.submitted-editor textarea.form-control {
+    min-height: 96px;
+    resize: vertical;
+}
+
+.submitted-editor .form-control:hover,
+.submitted-editor .form-select:hover {
+    border-color: #aab6c3;
+}
+
+.submitted-editor .form-control:focus,
+.submitted-editor .form-select:focus {
+    border-color: var(--blue, #123b69);
+    box-shadow: 0 0 0 3px rgba(18, 59, 105, 0.12);
+    outline: none;
+}
+
+.submitted-editor .form-check-input {
+    width: 17px;
+    height: 17px;
+    margin: 1px 0 0;
+    accent-color: var(--blue, #123b69);
+}
+
+.edit-label {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--ed-ink);
+    font-size: 13.5px;
+    font-weight: 600;
+}
+
+.edit-help {
+    display: block;
+    margin-top: 5px;
+    color: var(--ed-muted);
+    font-size: 12.5px;
+    line-height: 1.45;
+}
+
+
+/* ---------- Buttons ---------- */
+
+.submitted-editor .btn {
+    border-radius: 8px;
+}
+
+.submitted-editor .btn-outline-secondary {
+    background: #ffffff;
+    border: 1px solid var(--ed-field);
+    color: var(--ed-ink);
+}
+
+.submitted-editor .btn-outline-secondary:hover {
+    background: var(--blue-soft, #f6f9fc);
+    border-color: #aab6c3;
+    color: var(--ed-ink);
+}
+
+.submitted-editor .btn-lg {
+    min-height: 46px;
+    padding: 0 22px;
+    font-size: 15px;
+}
+
+.submitted-editor .btn:focus-visible,
+.submitted-editor a:focus-visible,
+.submitted-editor .form-check-input:focus-visible {
+    outline: 3px solid rgba(201, 154, 46, 0.55);
+    outline-offset: 2px;
+}
+
+
+/* ---------- Alerts ---------- */
+
+.submitted-editor .alert-danger {
+    background: var(--red-light, #fbeaec);
+    border: 1px solid #ecc5c8;
+    color: #7b1c24;
+}
+
+.editor-error {
+    margin-bottom: 18px;
+    padding: 16px 18px;
+    border-left: 4px solid var(--red, #b5222a) !important;
+    border-radius: 10px;
+}
+
+.editor-error ul {
+    padding-left: 20px;
+}
+
+
+/* ---------- Top bar ---------- */
+
 .editor-topbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 14px;
+    gap: 12px;
     flex-wrap: wrap;
-    margin-bottom: 18px;
+    margin-bottom: 16px;
 }
 
 .editor-topbar-left,
@@ -2344,346 +2454,281 @@ require_once __DIR__ . '/../includes/header.php';
     flex-wrap: wrap;
 }
 
+.editor-topbar-right {
+    color: var(--ed-muted);
+}
+
 .editor-badge {
     display: inline-flex;
     align-items: center;
     gap: 7px;
-    padding: 7px 11px;
+    padding: 5px 11px;
     border-radius: 999px;
-    background: #fff4f4;
-    border: 1px solid #f2c9cd;
-    color: #a61f2b;
-    font-size: .78rem;
-    font-weight: 800;
-    letter-spacing: .05em;
-    text-transform: uppercase;
+    background: var(--red-light, #fbeaec);
+    color: var(--red-dark, #8f1720);
+    font-size: 13px;
+    font-weight: 600;
 }
 
 .editor-badge-dot {
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
-    background: #c32430;
-    box-shadow: 0 0 0 3px rgba(195,36,48,.10);
+    background: var(--red, #b5222a);
 }
+
+
+/* ---------- Header + record summary (one panel) ---------- */
 
 .editor-page-header {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     gap: 24px;
-    padding: 27px 29px;
-    margin-bottom: 17px;
-    border: 1px solid #dfe5ee;
-    border-radius: 18px;
-    background:
-        radial-gradient(
-            circle at 90% 10%,
-            rgba(191,150,45,.12),
-            transparent 28%
-        ),
-        linear-gradient(
-            135deg,
-            #f7f9fd 0%,
-            #ffffff 62%
-        );
-    box-shadow: 0 7px 22px rgba(25,42,78,.06);
+    padding: 28px 32px 24px;
+    background: #ffffff;
+    border: 1px solid var(--ed-line);
+    border-bottom: 0;
+    border-radius: var(--ed-radius) var(--ed-radius) 0 0;
 }
 
 .editor-eyebrow {
     display: block;
     margin-bottom: 6px;
-    color: #bf962d;
-    font-size: .76rem;
-    font-weight: 900;
-    letter-spacing: .10em;
-    text-transform: uppercase;
+    color: var(--gold-dark, #9d741d);
+    font-size: 13.5px;
+    font-weight: 600;
 }
 
 .editor-page-header h1 {
-    margin: 0 0 8px;
-    color: #1e2e55;
-    font-size: clamp(1.65rem, 3vw, 2.2rem);
-    font-weight: 850;
+    color: var(--ed-ink);
+    font-size: 30px;
+    font-weight: 700;
+    letter-spacing: -0.015em;
     line-height: 1.15;
 }
 
 .editor-page-header p {
-    max-width: 760px;
-    margin: 0;
-    color: #657083;
-    font-size: .96rem;
-    line-height: 1.65;
+    max-width: 68ch;
+    margin-top: 8px;
+    color: var(--ed-muted);
+    font-size: 14.5px;
+    line-height: 1.6;
+}
+
+.editor-page-header p strong {
+    color: var(--ed-ink);
 }
 
 .editor-header-mark {
-    flex: 0 0 auto;
-    min-width: 170px;
-    padding: 14px 16px;
-    border: 1px solid #d9e0ed;
-    border-radius: 14px;
-    background: #fff;
+    flex-shrink: 0;
+    min-width: 180px;
+    padding: 12px 16px;
+    border: 1px solid var(--ed-line);
+    border-radius: 10px;
+    background: var(--blue-soft, #f6f9fc);
 }
 
 .editor-header-mark span {
     display: block;
-    color: #778196;
-    font-size: .74rem;
-    font-weight: 800;
-    letter-spacing: .06em;
-    text-transform: uppercase;
+    color: var(--ed-muted);
+    font-size: 12.5px;
 }
 
 .editor-header-mark strong {
     display: block;
-    margin-top: 4px;
-    color: #2f499f;
-    font-size: 1.08rem;
+    margin: 2px 0 4px;
+    color: var(--blue, #123b69);
+    font-size: 16px;
 }
 
 .editor-record-strip {
     display: grid;
-    grid-template-columns:
-        minmax(0, 1.65fr)
-        repeat(4, minmax(125px, .7fr));
-    gap: 10px;
-    margin-bottom: 17px;
+    grid-template-columns: minmax(0, 1.6fr) repeat(4, minmax(0, 1fr));
+    margin-bottom: 18px;
+    background: #fbfcfd;
+    border: 1px solid var(--ed-line);
+    border-radius: 0 0 var(--ed-radius) var(--ed-radius);
 }
 
 .editor-record-item {
     min-width: 0;
-    padding: 13px 15px;
-    border: 1px solid #dfe4ec;
-    border-radius: 13px;
-    background: #fff;
-    box-shadow: 0 3px 11px rgba(30,46,85,.04);
+    padding: 14px 20px 16px;
+}
+
+.editor-record-item + .editor-record-item {
+    border-left: 1px solid var(--ed-line);
 }
 
 .editor-record-item span {
     display: block;
-    margin-bottom: 4px;
-    color: #7a8495;
-    font-size: .72rem;
-    font-weight: 800;
-    letter-spacing: .06em;
-    text-transform: uppercase;
+    margin-bottom: 3px;
+    color: var(--ed-muted);
+    font-size: 12.5px;
 }
 
 .editor-record-item strong {
     display: block;
     overflow-wrap: anywhere;
-    color: #243457;
-    font-size: .91rem;
+    color: var(--ed-ink);
+    font-size: 14.5px;
+    font-weight: 650;
 }
 
 .editor-record-item.status strong {
-    color: #1d7a48;
+    color: var(--green-dark, #1c6039);
 }
+
+
+/* ---------- Edit session notice ---------- */
 
 .editor-security {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
-    gap: 13px;
-    margin-bottom: 21px;
-    padding: 15px 17px;
-    border: 1px solid #eadcb7;
-    border-left: 5px solid #bf962d;
-    border-radius: 13px;
-    background:
-        linear-gradient(
-            100deg,
-            #fffaf0,
-            #fffdf8
-        );
+    gap: 14px;
+    margin-bottom: 22px;
+    padding: 14px 18px;
+    background: var(--gold-soft, #fffdf6);
+    border: 1px solid #ecdcae;
+    border-left: 4px solid var(--gold, #c99a2e);
+    border-radius: 10px;
 }
 
 .editor-security-icon {
-    width: 38px;
-    height: 38px;
     display: grid;
     place-items: center;
-    border-radius: 11px;
-    background: #f4e7c1;
-    color: #795d0f;
-    font-weight: 900;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--gold-light, #fff8e5);
+    border: 1px solid #ecd9a4;
+    color: var(--gold-dark, #9d741d);
+    font-weight: 800;
 }
 
 .editor-security strong {
     display: block;
-    color: #5e4a13;
-    font-size: .9rem;
+    color: var(--ed-ink);
+    font-size: 14.5px;
 }
 
 .editor-security p {
-    margin: 2px 0 0;
-    color: #746b56;
-    font-size: .82rem;
+    margin-top: 2px;
+    color: #5b5440;
+    font-size: 13.5px;
     line-height: 1.5;
 }
 
 .editor-security-timer {
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: #ffffff;
+    border: 1px solid #ecd9a4;
+    color: var(--gold-dark, #9d741d);
+    font-size: 13px;
+    font-weight: 650;
     white-space: nowrap;
-    padding: 7px 10px;
-    border-radius: 9px;
-    background: #fff;
-    border: 1px solid #e3d7b7;
-    color: #6b5519;
-    font-size: .78rem;
-    font-weight: 800;
 }
 
-.editor-error {
-    margin-bottom: 18px;
-    border-radius: 13px;
-    border-left-width: 5px;
-}
+
+/* ---------- Form sections ---------- */
 
 .edit-section {
-    overflow: hidden;
-    margin-bottom: 17px;
-    border: 1px solid #dce2eb;
-    border-radius: 16px;
-    background: #fff;
-    box-shadow: 0 5px 17px rgba(31,48,84,.045);
+    margin-bottom: 18px;
+    background: #ffffff;
+    border: 1px solid var(--ed-line);
+    border-radius: var(--ed-radius);
 }
 
 .edit-section-header {
-    display: flex;
-    align-items: flex-start;
-    gap: 13px;
-    padding: 18px 21px;
-    border-bottom: 1px solid #e7ebf1;
-    background:
-        linear-gradient(
-            100deg,
-            #f7f9fd,
-            #fff
-        );
-}
-
-.edit-section-header::before {
-    content: "";
-    flex: 0 0 auto;
-    width: 7px;
-    height: 39px;
-    border-radius: 999px;
-    background: linear-gradient(#2f499f, #bf962d);
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid #eef1f4;
 }
 
 .edit-section-header h2 {
-    margin: 0 0 4px;
-    color: #23365f;
-    font-size: 1.06rem;
-    font-weight: 850;
+    color: var(--ed-ink);
+    font-size: 18px;
+    font-weight: 700;
     line-height: 1.3;
 }
 
 .edit-section-header p {
-    margin: 0;
-    color: #6e788a;
-    font-size: .84rem;
+    max-width: 75ch;
+    margin-top: 4px;
+    color: var(--ed-muted);
+    font-size: 13.5px;
     line-height: 1.5;
 }
 
 .edit-section-body {
-    padding: 22px;
+    padding: 22px 24px 24px;
 }
 
-.edit-label {
-    display: block;
-    margin-bottom: 6px;
-    color: #34415b;
-    font-size: .83rem;
-    font-weight: 800;
-}
 
-.edit-help {
-    display: block;
-    margin-top: 5px;
-    color: #7b8493;
-    font-size: .75rem;
-    line-height: 1.45;
-}
-
-.edit-section .form-control,
-.edit-section .form-select {
-    min-height: 44px;
-    border-color: #cfd6e1;
-    border-radius: 9px;
-    box-shadow: none;
-}
-
-.edit-section textarea.form-control {
-    min-height: 92px;
-}
-
-.edit-section .form-control:focus,
-.edit-section .form-select:focus {
-    border-color: #2f499f;
-    box-shadow: 0 0 0 3px rgba(47,73,159,.10);
-}
+/* ---------- Checkbox grids ---------- */
 
 .check-grid {
     display: grid;
-    grid-template-columns:
-        repeat(
-            auto-fit,
-            minmax(225px, 1fr)
-        );
-    gap: 9px;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 8px;
 }
 
 .check-item {
     display: flex;
     align-items: flex-start;
-    min-height: 46px;
-    gap: 8px;
+    gap: 10px;
+    min-height: 44px;
     padding: 11px 12px;
-    border: 1px solid #dce2ea;
-    border-radius: 10px;
-    background: #fbfcfe;
-    color: #3b465a;
-    font-size: .83rem;
-    font-weight: 650;
+    border: 1px solid var(--ed-line);
+    border-radius: 8px;
+    background: #ffffff;
+    color: var(--ed-ink);
+    font-size: 14px;
     line-height: 1.35;
     cursor: pointer;
-    transition:
-        border-color .15s ease,
-        background .15s ease,
-        box-shadow .15s ease;
 }
 
 .check-item:hover {
-    border-color: #aebbd5;
-    background: #f7f9fd;
+    border-color: #aab6c3;
 }
 
 .check-item:has(input:checked) {
-    border-color: #2f499f;
-    background: #f2f5fc;
-    box-shadow: inset 3px 0 0 #2f499f;
+    border-color: var(--blue, #123b69);
+    background: var(--blue-light, #edf4fb);
 }
 
-.check-item input {
-    flex: 0 0 auto;
-    margin-top: 1px;
+
+/* ---------- Other areas of operation ---------- */
+
+.operating-location-notice,
+.director-notice {
+    margin-bottom: 16px;
+    padding: 12px 14px;
+    background: var(--blue-soft, #f6f9fc);
+    border: 1px solid #dbe5ef;
+    border-radius: 8px;
+    color: #3e4a57;
+    font-size: 13.5px;
+    line-height: 1.55;
 }
 
-/* ==========================================================
-   OTHER AREAS OF OPERATION
-   ========================================================== */
-
-.operating-location-card {
-    position: relative;
-    margin-bottom: 13px;
-    padding: 18px;
-    border: 1px solid #dce2ea;
-    border-radius: 13px;
-    background: #fbfcfe;
+.operating-location-notice strong,
+.director-notice .fw-semibold {
+    color: var(--ed-ink);
 }
 
-.operating-location-card:last-child {
+.operating-location-card,
+.official-card {
+    margin-bottom: 12px;
+    padding: 18px 20px 20px;
+    background: #fbfcfd;
+    border: 1px solid var(--ed-line);
+    border-radius: 10px;
+}
+
+.operating-location-card:last-child,
+.official-card:last-child {
     margin-bottom: 0;
 }
 
@@ -2692,267 +2737,167 @@ require_once __DIR__ . '/../includes/header.php';
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    margin-bottom: 15px;
+    margin-bottom: 14px;
 }
 
-.operating-location-title {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    color: #2f4168;
-    font-size: .92rem;
-    font-weight: 800;
-}
-
-.operating-location-title::before {
-    content: "";
-    width: 8px;
-    height: 8px;
-    flex: 0 0 auto;
-    border-radius: 50%;
-    background: #2f499f;
+.operating-location-title,
+.official-card > .fw-bold {
+    color: var(--ed-ink);
+    font-size: 15px;
+    font-weight: 700;
 }
 
 .operating-location-remove {
-    white-space: nowrap;
-    border-radius: 8px;
-    font-size: .76rem;
-    font-weight: 750;
-}
-
-.operating-location-notice {
-    margin-bottom: 16px;
-    padding: 12px 14px;
-    border: 1px solid #d8e2f2;
-    border-radius: 11px;
-    background: #f5f8fd;
-    color: #52617a;
-    font-size: .82rem;
-    line-height: 1.5;
+    min-height: 34px;
+    padding: 0 12px;
+    font-size: 13px;
 }
 
 .operating-location-note {
-    margin-top: 6px;
-    color: #7b8493;
-    font-size: .74rem;
+    margin-top: 10px;
+    color: var(--ed-muted);
+    font-size: 12.5px;
     line-height: 1.45;
 }
 
 .add-operating-location {
-    margin-top: 15px;
-    font-weight: 750;
-}
-
-/* ==========================================================
-   OFFICIALS
-   ========================================================== */
-
-.official-card {
-    margin-bottom: 13px;
-    padding: 18px;
-    border: 1px solid #dce2ea;
-    border-radius: 13px;
-    background: #fbfcfe;
-}
-
-.official-card:last-child {
-    margin-bottom: 0;
-}
-
-.official-card > .fw-bold {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 14px !important;
-    color: #2f4168;
-    font-size: .92rem;
-}
-
-.official-card > .fw-bold::before {
-    content: "";
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #2f499f;
-}
-
-.director-card {
-    position: relative;
-}
-
-.director-notice {
-    margin-bottom: 15px;
-    padding: 13px 15px;
-    border: 1px solid #d8e2f2;
-    border-radius: 11px;
-    background: #f5f8fd;
-}
-
-.director-notice .fw-semibold {
-    color: #29406f;
-    font-size: .86rem;
-}
-
-.director-notice .small {
-    margin-top: 3px;
-    line-height: 1.5;
+    margin-top: 14px;
 }
 
 #beneficiary-groups {
-    transition: opacity .15s ease;
+    transition: opacity 0.15s ease;
 }
+
+
+/* ---------- Sticky save bar ---------- */
 
 .editor-action-bar {
     position: sticky;
-    bottom: 12px;
+    bottom: 14px;
     z-index: 30;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    margin-top: 20px;
-    padding: 14px 16px;
-    border: 1px solid #d4dae4;
-    border-radius: 15px;
-    background: rgba(255,255,255,.96);
-    box-shadow: 0 10px 28px rgba(24,37,64,.16);
-    backdrop-filter: blur(8px);
+    margin-top: 22px;
+    padding: 14px 18px;
+    background: #ffffff;
+    border: 1px solid #d5dce3;
+    border-radius: var(--ed-radius);
+    box-shadow: 0 8px 24px rgba(21, 40, 59, 0.12);
 }
 
 .editor-action-copy strong {
     display: block;
-    color: #24365d;
-    font-size: .88rem;
+    color: var(--ed-ink);
+    font-size: 14.5px;
 }
 
 .editor-action-copy span {
     display: block;
     margin-top: 2px;
-    color: #778194;
-    font-size: .76rem;
+    color: var(--ed-muted);
+    font-size: 13px;
 }
 
 .editor-action-buttons {
     display: flex;
     align-items: center;
-    gap: 9px;
+    gap: 10px;
     flex-wrap: wrap;
 }
 
 .editor-save-btn {
     min-width: 150px;
-    font-weight: 800;
 }
 
 .editor-unsaved {
     display: none;
-    margin-top: 5px;
-    color: #a61f2b;
-    font-size: .72rem;
-    font-weight: 750;
+    margin-top: 4px;
+    color: var(--red, #b5222a);
+    font-size: 13px;
+    font-weight: 600;
 }
 
 .editor-action-bar.is-dirty .editor-unsaved {
     display: block;
 }
 
-.editor-access-denied {
-    max-width: 850px;
-    margin: 45px auto;
-    padding: 28px;
-    border: 1px solid #e4c8cc;
-    border-top: 5px solid #c32430;
-    border-radius: 18px;
-    background: #fff;
-    box-shadow: 0 10px 28px rgba(37,47,68,.08);
-}
 
-.editor-access-denied .access-kicker {
-    color: #c32430;
-    font-size: .75rem;
-    font-weight: 900;
-    letter-spacing: .09em;
-    text-transform: uppercase;
-}
-
-.editor-access-denied h1 {
-    margin: 7px 0 9px;
-    color: #263452;
-    font-weight: 850;
-}
-
-.editor-access-denied p {
-    color: #697386;
-    line-height: 1.65;
-}
+/* ---------- Responsive ---------- */
 
 @media (max-width: 1050px) {
 
     .editor-record-strip {
-        grid-template-columns:
-            repeat(
-                2,
-                minmax(0, 1fr)
-            );
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .editor-record-item:first-child {
         grid-column: 1 / -1;
     }
+
+    .editor-record-item:nth-child(n + 2) {
+        border-top: 1px solid var(--ed-line);
+    }
+
+    .editor-record-item:nth-child(2n) {
+        border-left: 0;
+    }
 }
 
 @media (max-width: 760px) {
 
-    .submitted-editor {
-        padding: 18px 12px 58px;
+    .submitted-editor .row > .col-md-4,
+    .submitted-editor .row > .col-md-6,
+    .submitted-editor .row > .col-md-8 {
+        grid-column: span 12;
     }
 
     .editor-page-header {
         display: block;
-        padding: 21px;
+        padding: 22px 20px 18px;
+    }
+
+    .editor-page-header h1 {
+        font-size: 25px;
     }
 
     .editor-header-mark {
-        margin-top: 17px;
+        margin-top: 16px;
     }
 
     .editor-record-strip {
         grid-template-columns: 1fr;
     }
 
-    .editor-record-item:first-child {
-        grid-column: auto;
+    .editor-record-item + .editor-record-item {
+        border-left: 0;
+        border-top: 1px solid var(--ed-line);
     }
 
     .editor-security {
-        grid-template-columns:
-            auto minmax(0, 1fr);
+        grid-template-columns: auto minmax(0, 1fr);
     }
 
     .editor-security-timer {
         grid-column: 1 / -1;
-        width: fit-content;
+        justify-self: start;
     }
 
+    .edit-section-header,
     .edit-section-body {
-        padding: 17px;
-    }
-
-    .operating-location-heading {
-        align-items: flex-start;
+        padding-left: 18px;
+        padding-right: 18px;
     }
 
     .editor-action-bar {
-        align-items: stretch;
         flex-direction: column;
-    }
-
-    .editor-action-buttons {
-        width: 100%;
+        align-items: stretch;
     }
 
     .editor-action-buttons > * {
         flex: 1 1 0;
+        justify-content: center;
         text-align: center;
     }
 }
@@ -3357,11 +3302,10 @@ require_once __DIR__ . '/../includes/header.php';
                                         $field,
                                         [
                                             'county',
-                                            'sub_county',
                                             'physical_address',
                                             'postal_address',
-                                            'postal_code',
                                             'phone_number',
+                                            'email',
                                         ],
                                         true
                                     )
@@ -3383,11 +3327,10 @@ require_once __DIR__ . '/../includes/header.php';
                                     $field,
                                     [
                                         'county',
-                                        'sub_county',
                                         'physical_address',
                                         'postal_address',
-                                        'postal_code',
                                         'phone_number',
+                                        'email',
                                     ],
                                     true
                                 )
@@ -3434,13 +3377,12 @@ require_once __DIR__ . '/../includes/header.php';
                 <div class="operating-location-notice">
 
                     <strong>
-                        Additional operating locations are optional.
+                        Only the county is needed for each area of operation.
                     </strong>
 
-                    Leave the location cards blank if the organization
-                    operates only from its headquarters. If a location is
-                    entered, its core address and contact fields must be
-                    completed.
+                    Fill in the office details only if the organization has an
+                    office in that county. Leave the cards blank if the
+                    organization works only from its headquarters.
 
                 </div>
 
@@ -3651,10 +3593,7 @@ require_once __DIR__ . '/../includes/header.php';
                             </div>
 
                             <div class="operating-location-note">
-                                Required when this operating location is
-                                entered: County, Sub-County, Physical Address,
-                                Postal Address, Postal Code and Organization
-                                Phone Number.
+                                County is required. Office details are optional.
                             </div>
 
                         </div>
@@ -4680,9 +4619,7 @@ require_once __DIR__ . '/../includes/header.php';
             </div>
 
             <div class="operating-location-note">
-                Required when this operating location is entered:
-                County, Sub-County, Physical Address, Postal Address,
-                Postal Code and Organization Phone Number.
+                County is required. Office details are optional.
             </div>
         `;
 

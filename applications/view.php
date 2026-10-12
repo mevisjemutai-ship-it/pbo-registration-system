@@ -665,6 +665,7 @@ require_once __DIR__ . '/../includes/header.php';
 }
 
 .record-cover-main h1 {
+    color: #ffffff;
     position: relative;
     z-index: 1;
     margin: 0 0 7px;
@@ -1026,6 +1027,10 @@ require_once __DIR__ . '/../includes/header.php';
 
 .operation-location:first-of-type {
     margin-top: 0;
+}
+
+.selection-panel + .operation-location {
+    margin-top: 15px;
 }
 
 .operation-location-header {
@@ -2578,190 +2583,88 @@ require_once __DIR__ . '/../includes/header.php';
                             </div>
 
 
-                            <?php foreach (
-                                $operatingLocations
-                                as $index => $location
-                            ): ?>
+                            <?php
+                            /*
+                             * Office details for other counties are optional.
+                             * Show only what was filled in. Counties with no
+                             * details at all are listed together.
+                             */
+                            $locationFieldLabels = [
+                                'sub_county'               => 'Sub-County',
+                                'physical_address'         => 'Physical Address',
+                                'postal_address'           => 'Postal Address',
+                                'postal_code'              => 'Postal Code',
+                                'phone_number'             => 'Phone',
+                                'alternative_phone_number' => 'Alternative Phone',
+                                'email'                    => 'Email',
+                            ];
+
+                            $countiesWithoutDetails = [];
+                            $locationsWithDetails = [];
+
+                            foreach ($operatingLocations as $location) {
+                                $filled = [];
+
+                                foreach ($locationFieldLabels as $column => $label) {
+                                    if (hasValue($location[$column] ?? '')) {
+                                        $filled[$label] = (string) $location[$column];
+                                    }
+                                }
+
+                                if ($filled === []) {
+                                    $countiesWithoutDetails[] = (string) ($location['county'] ?? '');
+                                } else {
+                                    $locationsWithDetails[] = [
+                                        'county' => (string) ($location['county'] ?? ''),
+                                        'fields' => $filled,
+                                    ];
+                                }
+                            }
+                            ?>
+
+
+                            <?php if ($countiesWithoutDetails !== []): ?>
+
+                                <div class="selection-panel">
+
+                                    <div class="selection-grid">
+
+                                        <?php foreach ($countiesWithoutDetails as $countyName): ?>
+
+                                            <div class="selection-item">
+                                                <span class="selection-mark">&#10003;</span>
+                                                <span><?= displayValue($countyName) ?></span>
+                                            </div>
+
+                                        <?php endforeach; ?>
+
+                                    </div>
+
+                                </div>
+
+                            <?php endif; ?>
+
+
+                            <?php foreach ($locationsWithDetails as $location): ?>
 
                                 <div class="operation-location">
 
                                     <div class="operation-location-header">
-                                        Additional Operating Location
-                                        <?= $index + 1 ?>
+                                        <?= displayValue($location['county']) ?>
                                     </div>
 
                                     <div class="operation-location-body">
 
                                         <div class="detail-grid">
 
+                                            <?php foreach ($location['fields'] as $label => $value): ?>
 
-                                            <div class="detail-field">
-
-                                                <span>
-                                                    County
-                                                </span>
-
-                                                <strong>
-                                                    <?= displayValue(
-                                                        $location[
-                                                            'county'
-                                                        ] ?? ''
-                                                    ) ?>
-                                                </strong>
-
-                                            </div>
-
-
-                                            <?php if (
-                                                hasValue(
-                                                    $location[
-                                                        'sub_county'
-                                                    ] ?? ''
-                                                )
-                                            ): ?>
-
-                                                <div class="detail-field">
-
-                                                    <span>
-                                                        Sub-County
-                                                    </span>
-
-                                                    <strong>
-                                                        <?= e(
-                                                            (string)
-                                                            $location[
-                                                                'sub_county'
-                                                            ]
-                                                        ) ?>
-                                                    </strong>
-
+                                                <div class="detail-field<?= in_array($label, ['Physical Address', 'Email'], true) ? ' span-2' : '' ?>">
+                                                    <span><?= e($label) ?></span>
+                                                    <strong><?= e($value) ?></strong>
                                                 </div>
 
-                                            <?php endif; ?>
-
-
-                                            <div class="detail-field span-2">
-
-                                                <span>
-                                                    Physical Address
-                                                </span>
-
-                                                <strong>
-                                                    <?= displayValue(
-                                                        $location[
-                                                            'physical_address'
-                                                        ] ?? ''
-                                                    ) ?>
-                                                </strong>
-
-                                            </div>
-
-
-                                            <div class="detail-field">
-
-                                                <span>
-                                                    Postal Address
-                                                </span>
-
-                                                <strong>
-                                                    <?= displayValue(
-                                                        $location[
-                                                            'postal_address'
-                                                        ] ?? ''
-                                                    ) ?>
-                                                </strong>
-
-                                            </div>
-
-
-                                            <?php if (
-                                                hasValue(
-                                                    $location[
-                                                        'postal_code'
-                                                    ] ?? ''
-                                                )
-                                            ): ?>
-
-                                                <div class="detail-field">
-
-                                                    <span>
-                                                        Postal Code
-                                                    </span>
-
-                                                    <strong>
-                                                        <?= e(
-                                                            (string)
-                                                            $location[
-                                                                'postal_code'
-                                                            ]
-                                                        ) ?>
-                                                    </strong>
-
-                                                </div>
-
-                                            <?php endif; ?>
-
-
-                                            <div class="detail-field">
-
-                                                <span>
-                                                    Phone
-                                                </span>
-
-                                                <strong>
-                                                    <?= displayValue(
-                                                        $location[
-                                                            'phone_number'
-                                                        ] ?? ''
-                                                    ) ?>
-                                                </strong>
-
-                                            </div>
-
-
-                                            <?php if (
-                                                hasValue(
-                                                    $location[
-                                                        'alternative_phone_number'
-                                                    ] ?? ''
-                                                )
-                                            ): ?>
-
-                                                <div class="detail-field">
-
-                                                    <span>
-                                                        Alternative Phone
-                                                    </span>
-
-                                                    <strong>
-                                                        <?= e(
-                                                            (string)
-                                                            $location[
-                                                                'alternative_phone_number'
-                                                            ]
-                                                        ) ?>
-                                                    </strong>
-
-                                                </div>
-
-                                            <?php endif; ?>
-
-
-                                            <div class="detail-field span-2">
-
-                                                <span>
-                                                    Email
-                                                </span>
-
-                                                <strong>
-                                                    <?= displayValue(
-                                                        $location[
-                                                            'email'
-                                                        ] ?? ''
-                                                    ) ?>
-                                                </strong>
-
-                                            </div>
+                                            <?php endforeach; ?>
 
                                         </div>
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 session_start();
 
 require_once __DIR__ . '/config/database.php';
+require_once __DIR__ . '/includes/two-factor.php';
 
 if (!empty($_SESSION['user_id'])) {
     header('Location: dashboard.php');
@@ -12,6 +13,11 @@ if (!empty($_SESSION['user_id'])) {
 }
 
 $error = '';
+
+/*
+ * Shown after an administrator resets a forgotten password.
+ */
+$passwordWasReset = (($_GET['reset'] ?? '') === '1');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
@@ -27,6 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 id,
                 username,
                 full_name,
+                email,
                 password_hash,
                 role,
                 is_active,
@@ -48,32 +55,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             !password_verify($password, $user['password_hash'])
         ) {
             $error = 'Invalid username or password.';
-        } else {
+        } elseif (pboLoginNeedsCode($pdo, $user)) {
 
-            session_regenerate_id(true);
+            /*
+             * Administrator on a browser that is not trusted (or not
+             * used for a while): email a sign-in code first.
+             */
+            try {
+                $sendResult = pboSendLoginCode($pdo, $user);
 
-            $_SESSION['user_id'] = (int) $user['id'];
-            $_SESSION['username'] = $user['username'];
-            $_SESSION['full_name'] = $user['full_name'];
-            $_SESSION['role'] = $user['role'];
-            $_SESSION['must_change_password']
-                = (bool) $user['must_change_password'];
+                pboStartPendingLogin((int) $user['id']);
+                $_SESSION['pending_login']['notice'] = $sendResult;
 
-            $pdo->prepare(
-                'UPDATE users
-                 SET last_login_at = CURRENT_TIMESTAMP
-                 WHERE id = :id'
-            )->execute([
-                'id' => $user['id']
-            ]);
+                header('Location: verify-login.php');
+                exit;
 
-            if ($user['must_change_password']) {
-                header('Location: change-password.php');
-            } else {
-                header('Location: dashboard.php');
+            } catch (Throwable $exception) {
+
+                error_log(
+                    'PBO sign-in code email failed for user '
+                    . $user['id'] . ': ' . $exception->getMessage()
+                );
+
+                $error = pboMailShowErrors()
+                    ? 'The sign-in code could not be sent: ' . $exception->getMessage()
+                    : 'We could not send your sign-in code. Please try again in a few minutes.';
             }
 
-            exit;
+        } else {
+
+            pboFinishLogin($pdo, $user);
         }
     }
 }
@@ -98,7 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <div class="login-card">
 
     <div class="login-header">
-        <div class="system-mark">PBO</div>
+        <img class="login-logo" src="/pbo-portal/assets/images/pbora-logo.png" alt="Republic of Kenya | Public Benefit Organizations Regulatory Authority (PBORA)" width="539" height="180">
 
         <h1>PBO Registration System</h1>
 
@@ -106,6 +117,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             Authorized Staff Access
         </p>
     </div>
+
+    <?php if ($passwordWasReset && $error === ''): ?>
+
+        <div class="alert alert-success">
+            Your password has been changed. Sign in with your new password.
+        </div>
+
+    <?php endif; ?>
 
     <?php if ($error !== ''): ?>
 
@@ -157,11 +176,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     </form>
 
+    <p class="login-links">
+        <a href="forgot-password.php">Forgot password?</a>
+    </p>
+
     <p class="login-notice">
         Access is restricted to authorized personnel.
     </p>
 
 </div>
+
+<?php require __DIR__ . '/includes/auth-page-extras.php'; ?>
 
 </body>
 </html>
