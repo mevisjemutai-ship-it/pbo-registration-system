@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/application-validation.php';
+require_once __DIR__ . '/../includes/kenya-locations.php';
 
 requireLogin();
 requirePasswordChanged();
@@ -99,55 +100,15 @@ function nullIfEmpty(string $value): ?string
 |--------------------------------------------------------------------------
 */
 
-$countyOptions = [
-    'Mombasa',
-    'Kwale',
-    'Kilifi',
-    'Tana River',
-    'Lamu',
-    'Taita-Taveta',
-    'Garissa',
-    'Wajir',
-    'Mandera',
-    'Marsabit',
-    'Isiolo',
-    'Meru',
-    'Tharaka-Nithi',
-    'Embu',
-    'Kitui',
-    'Machakos',
-    'Makueni',
-    'Nyandarua',
-    'Nyeri',
-    'Kirinyaga',
-    "Murang'a",
-    'Kiambu',
-    'Turkana',
-    'West Pokot',
-    'Samburu',
-    'Trans Nzoia',
-    'Uasin Gishu',
-    'Elgeyo-Marakwet',
-    'Nandi',
-    'Baringo',
-    'Laikipia',
-    'Nakuru',
-    'Narok',
-    'Kajiado',
-    'Kericho',
-    'Bomet',
-    'Kakamega',
-    'Vihiga',
-    'Bungoma',
-    'Busia',
-    'Siaya',
-    'Kisumu',
-    'Homa Bay',
-    'Migori',
-    'Kisii',
-    'Nyamira',
-    'Nairobi City County',
-];
+$countyOptions = kenyaCounties($connection);
+
+/*
+| The 47 names now come from includes/kenya-locations.php, which reads
+| the kenya_counties table and falls back to the original hardcoded
+| list if the lookup migration has not been run yet. edit.php, view.php,
+| drafts.php and export-excel.php can use the same helper instead of
+| each keeping a copy.
+*/
 
 $countyMap = [];
 
@@ -3153,6 +3114,31 @@ require_once __DIR__ . '/../includes/header.php';
 })();
 
 </script>
+
+
+<!-- ==========================================================
+     Location suggestions (County / Sub-County / Postal Code)
+
+     Reference data is handed to the browser in one go rather than
+     looked up per keystroke: the whole sub-county map is a few KB,
+     and it keeps the dynamically-added operating-location rows
+     working without any extra requests.
+
+     The fields stay free text. This only adds suggestions.
+     ========================================================== -->
+
+<script>
+window.KENYA_LOCATIONS = <?= json_encode(
+    [
+        'counties'    => $countyOptions,
+        'subCounties' => kenyaSubCountyMap($connection),
+        'postal'      => kenyaPostalCodes($connection),
+    ],
+    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP
+) ?>;
+</script>
+
+<script src="/pbo-portal/assets/js/location-suggest.js"></script>
 
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
