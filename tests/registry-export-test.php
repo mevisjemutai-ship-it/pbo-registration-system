@@ -136,10 +136,10 @@ $pdo->exec("
     VALUES (1, 'Kiambu', 'Ruiru', 'Main Street', '0700111222');
 
     INSERT INTO application_objectives (application_id, objective_code, description)
-    VALUES (1, 'EDU', 'Support for primary school children');
+    VALUES (1, 'EDUCATION', 'Support for primary school children');
 
     INSERT INTO application_beneficiaries (application_id, beneficiary_code, description)
-    VALUES (1, 'CHILD', 'Children under 14');
+    VALUES (1, 'CHILDREN', 'Children under 14');
 
     INSERT INTO application_officials
         (application_id, full_name, designation, nationality,
@@ -329,6 +329,31 @@ $grids = substr_count($details, '<colgroup>');
 $tables = substr_count($details, '<table');
 check('every table carries the shared column grid',
     $grids === $tables, "{$grids} colgroups for {$tables} tables");
+
+echo "\nNothing empty, and no raw codes\n";
+
+/* The complaint: dashes standing in for fields nobody filled. */
+check('no em dash anywhere in the details export',
+    !has($details, '&mdash;') && !has($details, "\u{2014}"));
+check('no em dash anywhere in the list export',
+    !has($all, '&mdash;') && !has($all, "\u{2014}"));
+
+/* An empty labelled box is the same problem as a dash. */
+/* Match the rendered label, not the words - a CSS comment mentions them. */
+check('no Alternative Phone box when there is no alternative phone',
+    !has($details, 'class="label">Alternative Phone<'));
+check('the Phone box that DOES have a value is still there',
+    has($details, 'class="label">Phone<'));
+
+/* Codes are for the database, not for a supervisor reading a printout. */
+check('objective printed as a label, not a code',
+    has($details, 'Education') && !has($details, 'EDUCATION'));
+check('beneficiary printed as a label, not a code',
+    has($details, 'Children') && !has($details, 'CHILDREN'));
+
+/* The organization name is introduced rather than left bare. */
+check('organization name carries its own label',
+    has($details, 'Name of Organization') && has($details, 'Amani Children Trust'));
 
 echo "\n{$pass} passed, {$fail} failed\n";
 

@@ -679,7 +679,12 @@ p {
 .registry-tick-cell {
     width: 34px;
     text-align: center;
-    cursor: default;
+    cursor: pointer;
+
+    /* Dragging down the column ticks a run of rows; without this the
+       sweep highlights the page text instead. */
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 .registry-tick-cell input {

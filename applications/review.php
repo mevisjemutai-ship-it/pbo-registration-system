@@ -972,6 +972,15 @@ if (
 |
 */
 
+/*
+| This list is what BLOCKS submission, and it was the last place still
+| demanding a KRA PIN and an email from every official. The wizard stopped
+| requiring them, so the form said "optional" and then the Review page
+| refused to submit - the worst of both.
+|
+| KRA PIN is handled separately below, by nationality, because for a
+| Kenyan official it IS required. Email is not required of anybody.
+*/
 $requiredOfficialFields = [
 
     'full_name'
@@ -983,14 +992,8 @@ $requiredOfficialFields = [
     'id_passport_number'
         => 'ID / Passport Number',
 
-    'kra_pin'
-        => 'KRA PIN',
-
     'phone_number'
         => 'Phone Number',
-
-    'email'
-        => 'Email',
 ];
 
 
@@ -1056,6 +1059,26 @@ foreach (
             $roleLabel .
             ' — Email is invalid.';
     }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Tax identification
+    |--------------------------------------------------------------------------
+    |
+    | One shared rule - includes/official-rules.php - so the Review page
+    | cannot disagree with the page the details were entered on. A Kenyan
+    | official needs a KRA PIN; anyone else may record a foreign tax number
+    | instead, or none at all.
+    |
+    */
+
+    foreach (
+        officialTaxIdErrors($official, $roleLabel)
+        as $taxError
+    ) {
+        $completionErrors[] = $taxError;
+    }
 }
 
 
@@ -1117,6 +1140,14 @@ foreach (
         $completionErrors[] =
             $directorLabel .
             ' — Email is invalid.';
+    }
+
+
+    foreach (
+        officialTaxIdErrors($director, $directorLabel)
+        as $taxError
+    ) {
+        $completionErrors[] = $taxError;
     }
 }
 

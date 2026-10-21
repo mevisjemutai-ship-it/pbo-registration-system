@@ -35,6 +35,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/official-rules.php';
 require_once __DIR__ . '/../includes/pbo-registry-filters.php';
+require_once __DIR__ . '/../includes/application-labels.php';
 
 requireLogin();
 requirePasswordChanged();
@@ -67,12 +68,17 @@ function e(?string $value): string
     return htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
-/** A blank cell reads as a mistake; an em dash reads as "nothing recorded". */
+/*
+| Nothing recorded prints as nothing.
+|
+| This used to return an em dash. A dash in a cell reads as a value, and a
+| column of them reads as a record somebody filled in badly - when usually
+| the field simply does not apply. An empty cell says the same thing
+| without the accusation.
+*/
 function value(mixed $raw): string
 {
-    $raw = trim((string) $raw);
-
-    return $raw !== '' ? e($raw) : '&mdash;';
+    return e(trim((string) $raw));
 }
 
 function typeLabel(string $type): string
@@ -103,6 +109,67 @@ function monthName(mixed $month): string
     }
 
     return DateTimeImmutable::createFromFormat('!m', (string) $month)->format('F');
+}
+
+/**
+ * One label-and-value cell, or nothing at all when there is no value.
+ *
+ * A labelled box with nothing in it is the same problem as a dash: it
+ * reads as a field somebody failed to complete, when usually it simply
+ * does not apply. If there is no alternative phone number, there is no
+ * Alternative Phone box.
+ */
+function field(string $label, mixed $raw, int $span = 4): string
+{
+    $raw = trim((string) $raw);
+
+    if ($raw === '') {
+        return '';
+    }
+
+    return '<td colspan="' . $span . '">'
+        . '<span class="label">' . e($label) . '</span>'
+        . '<span class="value">' . nl2br(e($raw)) . '</span>'
+        . '</td>';
+}
+
+/**
+ * Lay fields out in rows, skipping the empty ones and padding the last
+ * row back out to the full grid - a row that stops short pulls every
+ * section beneath it out of alignment in Excel.
+ */
+function fieldRows(array $fields, int $span = 4): string
+{
+    $cells = [];
+
+    foreach ($fields as $label => $raw) {
+        $cell = field((string) $label, $raw, $span);
+
+        if ($cell !== '') {
+            $cells[] = $cell;
+        }
+    }
+
+    if ($cells === []) {
+        return '';
+    }
+
+    $perRow = intdiv(GRID_COLUMNS, $span);
+    $html = '';
+
+    foreach (array_chunk($cells, $perRow) as $row) {
+        $html .= '<tr>' . implode('', $row);
+
+        $short = GRID_COLUMNS - (count($row) * $span);
+
+        if ($short > 0) {
+            $html .= '<td colspan="' . $short . '" class="pad"></td>';
+        }
+
+        $html .= '</tr>';
+    }
+
+    return $html;
 }
 
 /** The one colgroup every table repeats, so Excel builds a single grid. */
@@ -377,10 +444,66 @@ th {
     color: #4a5a68;
 }
 
-.label { color: #6b7a87; font-size: 8pt; text-transform: uppercase; letter-spacing: .04em; }
+/*
+| Labels were disappearing against the values - "Alternative Phone" and
+| "Other Areas of Operation" in particular. Bolder and darker, not bigger:
+| the value is still the thing being read, the label just has to hold its
+| own beside it.
+*/
+/* Pads a short row out to the full grid; it is there for the grid, not
+   for the reader, so it carries nothing. */
+.pad {
+    border-color: #ffffff;
+    background: #ffffff;
+}
+
+.label {
+    display: block;
+    color: #41535f;
+    font-size: 8pt;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    margin-bottom: 2px;
+}
+
+.value {
+    display: block;
+    font-weight: bold;
+    font-size: 10pt;
+    color: #16242f;
+}
+
 .strong { font-weight: bold; }
 .spacer td { border: 0; height: 10px; padding: 0; }
 .muted { color: #8a949d; }
+
+/*
+| Short values sit centred in their column; addresses, descriptions and
+| names stay left, because centred prose is hard to read down a page.
+*/
+td, th { text-align: center; }
+.left, th.left { text-align: left; }
+
+/* The name of the organization, with its label above it. */
+.record-name td {
+    background: #0f3c5f;
+    border-color: #0f3c5f;
+    color: #ffffff;
+    padding: 12px 14px;
+    text-align: left;
+}
+
+.record-name .label {
+    color: #9dc4e0;
+}
+
+.record-name .name {
+    display: block;
+    font-size: 15pt;
+    font-weight: bold;
+    line-height: 1.2;
+}
 
 /* Each organization starts a new sheet of paper in details mode. */
 .record { page-break-before: always; }
@@ -418,9 +541,7 @@ th {
 
 <?php if ($format === 'print'): ?>
     <div class="toolbar">
-        <?= count($records) ?>
-        organization<?= count($records) === 1 ? '' : 's' ?>
-        &mdash; <?= e($description) ?>
+        <?= e($description) ?>
         <button type="button" onclick="window.print()">Print</button>
         <button type="button" onclick="window.close()">Close</button>
     </div>
@@ -481,7 +602,7 @@ th {
         <tr>
             <th colspan="1">#</th>
             <th colspan="2">Registration No.</th>
-            <th colspan="5">Name of Organization</th>
+            <th colspan="5" class="left">Name of Organization</th>
             <th colspan="2">Type</th>
             <th colspan="2">Registered</th>
         </tr>
@@ -490,7 +611,7 @@ th {
             <tr>
                 <td colspan="1"><?= $index + 1 ?></td>
                 <td colspan="2"><?= value($record['pbo_registration_number']) ?></td>
-                <td colspan="5" class="strong"><?= value($record['pbo_name']) ?></td>
+                <td colspan="5" class="strong left"><?= value($record['pbo_name']) ?></td>
                 <td colspan="2"><?= value(typeLabel((string) $record['registration_type'])) ?></td>
                 <td colspan="2"><?= value(prettyDate($record['registration_date'])) ?></td>
             </tr>
@@ -509,43 +630,25 @@ th {
 
             <table>
                 <?= grid() ?>
-                <tr class="section-title">
+                <tr class="record-name">
                     <td colspan="<?= GRID_COLUMNS ?>">
-                        <?= value($record['pbo_name']) ?>
+                        <span class="label">Name of Organization</span>
+                        <span class="name"><?= value($record['pbo_name']) ?></span>
                     </td>
                 </tr>
-                <tr>
-                    <td colspan="4">
-                        <span class="label">Registration Number</span><br>
-                        <span class="strong"><?= value($record['pbo_registration_number']) ?></span>
-                    </td>
-                    <td colspan="4">
-                        <span class="label">Date of Registration</span><br>
-                        <span class="strong"><?= value(prettyDate($record['registration_date'])) ?></span>
-                    </td>
-                    <td colspan="4">
-                        <span class="label">Type</span><br>
-                        <span class="strong"><?= value(typeLabel((string) $record['registration_type'])) ?></span>
-                    </td>
-                </tr>
-                <tr>
-                    <td colspan="4">
-                        <span class="label">Application Reference</span><br>
-                        <?= value($record['application_reference']) ?>
-                    </td>
-                    <td colspan="4">
-                        <span class="label">Financial Year</span><br>
-                        <?php
-                        $start = monthName($record['financial_year_start_month']);
-                        $end = monthName($record['financial_year_end_month']);
-                        ?>
-                        <?= value($start !== '' && $end !== '' ? $start . ' to ' . $end : '') ?>
-                    </td>
-                    <td colspan="4">
-                        <span class="label">Submitted</span><br>
-                        <?= value(prettyDate(substr((string) $record['submitted_at'], 0, 10))) ?>
-                    </td>
-                </tr>
+                <?php
+                $start = monthName($record['financial_year_start_month']);
+                $end = monthName($record['financial_year_end_month']);
+                ?>
+
+                <?= fieldRows([
+                    'Registration Number' => $record['pbo_registration_number'],
+                    'Date of Registration' => prettyDate($record['registration_date']),
+                    'Type' => typeLabel((string) $record['registration_type']),
+                    'Application Reference' => $record['application_reference'],
+                    'Financial Year' => $start !== '' && $end !== '' ? $start . ' to ' . $end : '',
+                    'Submitted' => prettyDate(substr((string) $record['submitted_at'], 0, 10)),
+                ], 4) ?>
             </table>
 
             <?php $address = $addresses[$id] ?? null; ?>
@@ -555,44 +658,16 @@ th {
                 <tr class="subsection">
                     <td colspan="<?= GRID_COLUMNS ?>">Head Office</td>
                 </tr>
-                <tr>
-                    <td colspan="4">
-                        <span class="label">County</span><br>
-                        <?= value($address['county'] ?? '') ?>
-                    </td>
-                    <td colspan="4">
-                        <span class="label">Sub-County</span><br>
-                        <?= value($address['sub_county'] ?? '') ?>
-                    </td>
-                    <td colspan="4">
-                        <span class="label">Postal Code</span><br>
-                        <?= value($address['postal_code'] ?? '') ?>
-                    </td>
-                </tr>
-                <tr>
-                    <td colspan="6">
-                        <span class="label">Physical Address</span><br>
-                        <?= value($address['physical_address'] ?? '') ?>
-                    </td>
-                    <td colspan="6">
-                        <span class="label">Postal Address</span><br>
-                        <?= value($address['postal_address'] ?? '') ?>
-                    </td>
-                </tr>
-                <tr>
-                    <td colspan="4">
-                        <span class="label">Phone</span><br>
-                        <?= value($address['phone_number'] ?? '') ?>
-                    </td>
-                    <td colspan="4">
-                        <span class="label">Alternative Phone</span><br>
-                        <?= value($address['alternative_phone_number'] ?? '') ?>
-                    </td>
-                    <td colspan="4">
-                        <span class="label">Email</span><br>
-                        <?= value($address['email'] ?? '') ?>
-                    </td>
-                </tr>
+                <?= fieldRows([
+                    'County' => $address['county'] ?? '',
+                    'Sub-County' => $address['sub_county'] ?? '',
+                    'Postal Code' => $address['postal_code'] ?? '',
+                    'Physical Address' => $address['physical_address'] ?? '',
+                    'Postal Address' => $address['postal_address'] ?? '',
+                    'Phone' => $address['phone_number'] ?? '',
+                    'Alternative Phone' => $address['alternative_phone_number'] ?? '',
+                    'Email' => $address['email'] ?? '',
+                ], 4) ?>
             </table>
 
             <?php if (!empty($locations[$id])): ?>
@@ -605,16 +680,16 @@ th {
                         </td>
                     </tr>
                     <tr>
-                        <th colspan="3">County</th>
+                        <th colspan="3" class="left">County</th>
                         <th colspan="3">Sub-County</th>
-                        <th colspan="4">Physical Address</th>
+                        <th colspan="4" class="left">Physical Address</th>
                         <th colspan="2">Phone</th>
                     </tr>
                     <?php foreach ($locations[$id] as $location): ?>
                         <tr>
-                            <td colspan="3"><?= value($location['county']) ?></td>
+                            <td colspan="3" class="strong left"><?= value($location['county']) ?></td>
                             <td colspan="3"><?= value($location['sub_county']) ?></td>
-                            <td colspan="4"><?= value($location['physical_address']) ?></td>
+                            <td colspan="4" class="left"><?= value($location['physical_address']) ?></td>
                             <td colspan="2"><?= value($location['phone_number']) ?></td>
                         </tr>
                     <?php endforeach; ?>
@@ -629,8 +704,13 @@ th {
                     </tr>
                     <?php foreach ($objectives[$id] as $objective): ?>
                         <tr>
-                            <td colspan="3" class="strong"><?= value($objective['objective_code']) ?></td>
-                            <td colspan="9"><?= value($objective['description']) ?></td>
+                            <td colspan="4" class="strong">
+                                <?= e(pboCodeLabel(
+                                    (string) $objective['objective_code'],
+                                    pboObjectiveLabels()
+                                )) ?>
+                            </td>
+                            <td colspan="8" class="left"><?= value($objective['description']) ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </table>
@@ -644,8 +724,13 @@ th {
                     </tr>
                     <?php foreach ($beneficiaries[$id] as $beneficiary): ?>
                         <tr>
-                            <td colspan="3" class="strong"><?= value($beneficiary['beneficiary_code']) ?></td>
-                            <td colspan="9"><?= value($beneficiary['description']) ?></td>
+                            <td colspan="4" class="strong">
+                                <?= e(pboCodeLabel(
+                                    (string) $beneficiary['beneficiary_code'],
+                                    pboBeneficiaryLabels()
+                                )) ?>
+                            </td>
+                            <td colspan="8" class="left"><?= value($beneficiary['description']) ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </table>
@@ -659,7 +744,7 @@ th {
                     </tr>
                     <tr>
                         <th colspan="2">Position</th>
-                        <th colspan="3">Name</th>
+                        <th colspan="3" class="left">Name</th>
                         <th colspan="2">Nationality</th>
                         <th colspan="2">ID / Passport</th>
                         <th colspan="3">Tax ID</th>
@@ -670,15 +755,13 @@ th {
                             <td colspan="2">
                                 <?= value(ucwords(strtolower((string) $official['designation']))) ?>
                             </td>
-                            <td colspan="3" class="strong"><?= value($official['full_name']) ?></td>
+                            <td colspan="3" class="strong left"><?= value($official['full_name']) ?></td>
                             <td colspan="2"><?= value($official['nationality']) ?></td>
                             <td colspan="2"><?= value($official['id_passport_number']) ?></td>
                             <td colspan="3">
-                                <?php if ($tax === null): ?>
-                                    &mdash;
-                                <?php else: ?>
-                                    <span class="label"><?= e($tax['label']) ?></span><br>
-                                    <?= e($tax['value']) ?>
+                                <?php if ($tax !== null): ?>
+                                    <span class="label"><?= e($tax['label']) ?></span>
+                                    <span class="value"><?= e($tax['value']) ?></span>
                                 <?php endif; ?>
                             </td>
                         </tr>

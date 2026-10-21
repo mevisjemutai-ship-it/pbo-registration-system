@@ -2296,11 +2296,6 @@ require_once __DIR__ .
                                 class="required kra-required"
                                 data-kra-required
                             >*</span>
-                            <span
-                                class="optional-note kra-optional"
-                                data-kra-optional
-                                hidden
-                            >(if any)</span>
                         </label>
 
                         <input
@@ -2373,7 +2368,6 @@ require_once __DIR__ .
 
                         <label>
                             Other Tax Identification Type
-                            <span class="optional-note">(if any)</span>
                         </label>
 
                         <input
@@ -2397,7 +2391,6 @@ require_once __DIR__ .
 
                         <label>
                             Other Tax Identification Number
-                            <span class="optional-note">(if any)</span>
                         </label>
 
                         <input
@@ -2425,7 +2418,6 @@ require_once __DIR__ .
 
                         <label>
                             Email
-                            <span class="optional-note">(optional)</span>
                         </label>
 
                         <input
@@ -2831,11 +2823,6 @@ require_once __DIR__ .
                                                 class="required"
                                                 data-kra-required
                                             >*</span>
-                                            <span
-                                                class="optional-note"
-                                                data-kra-optional
-                                                hidden
-                                            >(if any)</span>
                                         </label>
 
                                         <input
@@ -3258,11 +3245,6 @@ require_once __DIR__ .
                     <label>
                         KRA PIN
                         <span class="required" data-kra-required>*</span>
-                        <span
-                            class="optional-note"
-                            data-kra-optional
-                            hidden
-                        >(if any)</span>
                     </label>
 
                     <input

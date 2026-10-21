@@ -214,10 +214,147 @@
 
     /* ---- ticking ------------------------------------------------------- */
 
-    ticks.forEach(function (tick) {
+    /*
+    | Ticking a run of rows
+    | ---------------------
+    | Two ways, both the ones people already expect from a file list:
+    |
+    |   shift-click  tick everything between the last row clicked and
+    |                this one;
+    |   drag         hold the button down over the tick column and sweep.
+    |
+    | Both set every row in the run to match the row that started it, so
+    | dragging back over a run un-ticks it, the same as dragging forward
+    | ticked it.
+    */
+
+    var lastClicked = null;
+
+    function applyRange(fromIndex, toIndex, on) {
+        var start = Math.min(fromIndex, toIndex);
+        var end = Math.max(fromIndex, toIndex);
+
+        for (var i = start; i <= end; i++) {
+            var at = selected.indexOf(ticks[i].value);
+
+            if (on && at === -1) {
+                selected.push(ticks[i].value);
+            } else if (!on && at !== -1) {
+                selected.splice(at, 1);
+            }
+        }
+
+        save(selected);
+        render();
+    }
+
+    ticks.forEach(function (tick, index) {
+
+        tick.addEventListener('click', function (event) {
+
+            if (event.shiftKey && lastClicked !== null) {
+                /*
+                | The browser has already toggled this box; extend that
+                | same state back to the row last clicked.
+                */
+                applyRange(lastClicked, index, tick.checked);
+            }
+
+            lastClicked = index;
+        });
+
         tick.addEventListener('change', function () {
             setSelected(tick.value, tick.checked);
         });
+    });
+
+    /* ---- drag to tick a run ------------------------------------------- */
+
+    var dragging = false;
+    var dragFrom = null;
+    var dragTo = null;
+    var dragState = false;
+
+    function tickIndexFrom(target) {
+        var cell = target.closest ? target.closest('.registry-tick-cell') : null;
+
+        if (!cell) {
+            return -1;
+        }
+
+        var box = cell.querySelector('[data-registry-tick]');
+
+        return box ? ticks.indexOf(box) : -1;
+    }
+
+    document.addEventListener('mousedown', function (event) {
+
+        /* Left button only, and only in the tick column. */
+        if (event.button !== 0) {
+            return;
+        }
+
+        var index = tickIndexFrom(event.target);
+
+        if (index === -1) {
+            return;
+        }
+
+        dragging = true;
+        dragFrom = index;
+        dragTo = index;
+
+        /*
+        | Where the drag starts decides the whole run. Clicking the box
+        | itself toggles it, so take the state it is about to reach.
+        */
+        dragState = event.target.matches('[data-registry-tick]')
+            ? !ticks[index].checked
+            : !ticks[index].checked;
+    });
+
+    document.addEventListener('mouseover', function (event) {
+
+        if (!dragging) {
+            return;
+        }
+
+        var index = tickIndexFrom(event.target);
+
+        if (index === -1 || index === dragTo) {
+            return;
+        }
+
+        dragTo = index;
+
+        applyRange(dragFrom, dragTo, dragState);
+
+        /* Stop the sweep selecting the page's text as it goes. */
+        if (window.getSelection) {
+            window.getSelection().removeAllRanges();
+        }
+    });
+
+    document.addEventListener('mouseup', function () {
+
+        if (!dragging) {
+            return;
+        }
+
+        /* A press and release on one row is an ordinary click: leave it. */
+        if (dragFrom !== dragTo) {
+            applyRange(dragFrom, dragTo, dragState);
+            lastClicked = dragTo;
+        }
+
+        dragging = false;
+        dragFrom = null;
+        dragTo = null;
+    });
+
+    /* A drag that leaves the window should not carry on invisibly. */
+    document.addEventListener('mouseleave', function () {
+        dragging = false;
     });
 
     if (pageToggle) {
