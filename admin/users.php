@@ -576,15 +576,41 @@ require_once __DIR__ . '/../includes/header.php';
 
                                 <?php if ($isCurrentUser): ?>
 
-                                    <span
-                                        class="current-account-note"
-                                    >
-                                        Signed in
-                                    </span>
+                                    <div class="user-action-group">
+
+                                        <span
+                                            class="current-account-note"
+                                        >
+                                            Signed in
+                                        </span>
+
+                                        <!--
+                                            Editing your own name and username
+                                            is safe here: the role and the
+                                            password are not touched.
+                                        -->
+                                        <a
+                                            href="/pbo-portal/admin/edit-user.php?id=<?= (int) $user['id'] ?>"
+                                            class="user-action edit-action"
+                                        >
+                                            Edit
+                                        </a>
+
+                                    </div>
 
                                 <?php else: ?>
 
                                     <div class="user-action-group">
+
+
+                                        <!-- EDIT NAME / USERNAME -->
+
+                                        <a
+                                            href="/pbo-portal/admin/edit-user.php?id=<?= (int) $user['id'] ?>"
+                                            class="user-action edit-action"
+                                        >
+                                            Edit
+                                        </a>
 
 
                                         <!-- RESET PASSWORD -->

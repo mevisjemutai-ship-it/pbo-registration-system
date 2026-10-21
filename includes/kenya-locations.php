@@ -25,6 +25,9 @@ declare(strict_types=1);
 /**
  * The original hardcoded list, kept as a fallback.
  *
+ * Written in county-code order because that is how the gazette numbers them;
+ * kenyaCounties() sorts it before handing it to a form.
+ *
  * @return list<string>
  */
 function kenyaCountiesFallback(): array
@@ -42,7 +45,11 @@ function kenyaCountiesFallback(): array
 }
 
 /**
- * All 47 county names, in the official county-code order the form expects.
+ * All 47 county names, A to Z.
+ *
+ * Alphabetical, not county-code order: staff look a county up by name, and
+ * nobody remembers that Nakuru is 32. The code is still the join key in the
+ * database - this is display order only.
  *
  * @return list<string>
  */
@@ -57,7 +64,7 @@ function kenyaCounties(?PDO $connection = null): array
     if ($connection instanceof PDO) {
         try {
             $rows = $connection
-                ->query('SELECT county_name FROM kenya_counties ORDER BY county_code')
+                ->query('SELECT county_name FROM kenya_counties ORDER BY county_name')
                 ->fetchAll(PDO::FETCH_COLUMN);
 
             if (is_array($rows) && count($rows) === 47) {
@@ -71,6 +78,9 @@ function kenyaCounties(?PDO $connection = null): array
     }
 
     $cache = kenyaCountiesFallback();
+
+    // Match the database ordering so the form looks the same either way.
+    usort($cache, static fn (string $a, string $b): int => strcasecmp($a, $b));
 
     return $cache;
 }

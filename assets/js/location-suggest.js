@@ -164,13 +164,30 @@
     /* ---- operating-location rows (added dynamically) ------------------ */
 
     /*
-    | Those inputs are named operating_locations[<county-slug>][<field>] and
-    | live inside a block carrying data-operating-location="<county-slug>",
-    | so the county is known from the markup - no lookup request needed.
+    | Those inputs are named operating_locations[<key>][<field>].
+    |
+    | On create.php the key is a county slug, so the county is known from the
+    | markup. On edit.php and edit-submitted.php the rows are numbered
+    | (operating_locations[0][county]) and the county is a free-text box in
+    | the same row - so fall back to reading that box's current value.
     */
 
+    function rowCountyValue(field) {
+        var match = field.name.match(/^operating_locations\[([^\]]+)\]\[/);
+
+        if (!match) {
+            return '';
+        }
+
+        var sibling = document.getElementsByName(
+            'operating_locations[' + match[1] + '][county]'
+        )[0];
+
+        return sibling ? sibling.value : '';
+    }
+
     function wireOperatingField(field) {
-        if (!field || !field.name || field.dataset.kenyaWired === '1') {
+        if (!field || !field.name) {
             return;
         }
 
@@ -180,26 +197,77 @@
             return;
         }
 
-        var countyName = bySlug[match[1]];
         var key = match[2];
 
-        if (key === 'sub_county' && countyName) {
-            var listId = subListFor(countyName);
-
-            if (listId) {
-                attach(field, listId);
+        /*
+        | The county box itself: the same 47 names as everywhere else.
+        | Wired once - the list never changes.
+        */
+        if (key === 'county') {
+            if (field.dataset.kenyaWired !== '1') {
+                attach(field, 'kenya-county-list');
+                field.dataset.kenyaWired = '1';
             }
-        } else if (key === 'postal_code' && POSTAL.length) {
-            attach(field, 'kenya-postal-list');
-        } else {
+
             return;
         }
 
-        field.dataset.kenyaWired = '1';
+        if (key === 'postal_code') {
+            if (POSTAL.length && field.dataset.kenyaWired !== '1') {
+                attach(field, 'kenya-postal-list');
+                field.dataset.kenyaWired = '1';
+            }
+
+            return;
+        }
+
+        if (key !== 'sub_county') {
+            return;
+        }
+
+        /*
+        | Sub-county is NOT wired once and left alone: the staff member can
+        | change the county in the same row afterwards, and the old county's
+        | list would then be wrong. Re-resolve every time.
+        */
+        var countyName = bySlug[match[1]] || rowCountyValue(field);
+        var listId = countyName ? subListFor(countyName) : null;
+
+        if (listId) {
+            attach(field, listId);
+        } else {
+            field.removeAttribute('list');
+        }
     }
 
     document.addEventListener('focusin', function (event) {
         wireOperatingField(event.target);
+    });
+
+    /*
+    | Typing a county into a numbered row re-points that row's sub-county
+    | list at the right county.
+    */
+    document.addEventListener('input', function (event) {
+        var field = event.target;
+
+        if (
+            !field
+            || !field.name
+            || !/^operating_locations\[[^\]]+\]\[county\]$/.test(field.name)
+        ) {
+            return;
+        }
+
+        var key = field.name.match(/^operating_locations\[([^\]]+)\]/)[1];
+
+        var sub = document.getElementsByName(
+            'operating_locations[' + key + '][sub_county]'
+        )[0];
+
+        if (sub) {
+            wireOperatingField(sub);
+        }
     });
 
     /* Catch rows that appear without ever being focused (restored drafts). */

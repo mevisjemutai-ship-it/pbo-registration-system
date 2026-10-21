@@ -3467,7 +3467,7 @@ require_once __DIR__ . '/../includes/header.php';
                     </h2>
 
                     <p>
-                        Chairperson, Treasurer and Secretary
+                        Chairperson, Secretary and Treasurer
                     </p>
 
                 </div>
@@ -3482,8 +3482,8 @@ require_once __DIR__ . '/../includes/header.php';
                     <?php foreach (
                         [
                             'CHAIRPERSON',
-                            'TREASURER',
                             'SECRETARY',
+                            'TREASURER',
                         ]
                         as $designation
                     ): ?>

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/kenya-locations.php';
 
 requireLogin();
 requirePasswordChanged();
@@ -943,8 +944,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     foreach (
         [
             'CHAIRPERSON',
-            'TREASURER',
             'SECRETARY',
+            'TREASURER',
         ] as $designation
     ) {
 
@@ -1360,37 +1361,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
      |--------------------------------------------------------------------------
      */
 
+    /*
+     | Mirrors officials.php: KRA PIN is never required, and email is
+     | required for the Chairperson only.
+     */
     foreach (
         [
             'CHAIRPERSON' => 'Chairperson',
-            'TREASURER' => 'Treasurer',
             'SECRETARY' => 'Secretary',
+            'TREASURER' => 'Treasurer',
         ] as $designation => $label
     ) {
 
         $official =
             $officials[$designation];
 
+        $officialFields = [
+            'full_name' =>
+                'Name',
+
+            'nationality' =>
+                'Nationality',
+
+            'id_passport_number' =>
+                'ID / Passport Number',
+
+            'phone_number' =>
+                'Phone Number',
+        ];
+
+        if ($designation === 'CHAIRPERSON') {
+            $officialFields['email'] = 'Email';
+        }
+
         foreach (
-            [
-                'full_name' =>
-                    'Name',
-
-                'nationality' =>
-                    'Nationality',
-
-                'id_passport_number' =>
-                    'ID / Passport Number',
-
-                'kra_pin' =>
-                    'KRA PIN',
-
-                'phone_number' =>
-                    'Phone Number',
-
-                'email' =>
-                    'Email',
-            ] as $field => $fieldLabel
+            $officialFields as $field => $fieldLabel
         ) {
 
             if (
@@ -1452,7 +1457,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         /*
-         * Once started, all Director particulars are mandatory.
+         * Once started, a Director's particulars are mandatory - except the
+         * KRA PIN, which many officials genuinely do not have.
          */
         foreach (
             [
@@ -1464,9 +1470,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 'id_passport_number' =>
                     'ID / Passport Number',
-
-                'kra_pin' =>
-                    'KRA PIN',
 
                 'phone_number' =>
                     'Phone Number',
@@ -2066,8 +2069,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             foreach (
                 [
                     'CHAIRPERSON',
-                    'TREASURER',
                     'SECRETARY',
+                    'TREASURER',
                 ] as $designation
             ) {
 
@@ -3317,8 +3320,14 @@ require_once __DIR__ . '/../includes/header.php';
 
                             </label>
 
+                            <!--
+                                The id is what location-suggest.js looks for
+                                when attaching the county / sub-county /
+                                postal-code suggestion lists.
+                            -->
                             <input
                                 class="form-control"
+                                id="<?= e($field) ?>"
                                 name="<?= e($field) ?>"
                                 value="<?= e(
                                     $form[$field]
@@ -4069,7 +4078,7 @@ require_once __DIR__ . '/../includes/header.php';
                     </h2>
 
                     <p>
-                        Chairperson, Treasurer and Secretary are required.
+                        Chairperson, Secretary and Treasurer are required.
                         Directors are optional; an entered Director must be
                         complete.
                     </p>
@@ -4083,8 +4092,8 @@ require_once __DIR__ . '/../includes/header.php';
                 <?php
                 $principalOfficials = [
                     'CHAIRPERSON' => 'Chairperson',
-                    'TREASURER' => 'Treasurer',
                     'SECRETARY' => 'Secretary',
+                    'TREASURER' => 'Treasurer',
                 ];
                 ?>
 
@@ -4121,25 +4130,35 @@ require_once __DIR__ . '/../includes/header.php';
                         <div class="row g-3">
 
                             <?php
+                            /*
+                            | Third element: whether the browser enforces it.
+                            | KRA PIN is never required; email is required for
+                            | the Chairperson only.
+                            */
                             $officialFields = [
-                                ['full_name', 'Name'],
-                                ['nationality', 'Nationality'],
-                                ['id_passport_number', 'ID / Passport Number'],
-                                ['kra_pin', 'KRA PIN'],
-                                ['phone_number', 'Phone Number'],
-                                ['email', 'Email'],
+                                ['full_name', 'Name', true],
+                                ['nationality', 'Nationality', true],
+                                ['id_passport_number', 'ID / Passport Number', true],
+                                ['kra_pin', 'KRA PIN', false],
+                                ['phone_number', 'Phone Number', true],
+                                ['email', 'Email', $designation === 'CHAIRPERSON'],
                             ];
                             ?>
 
                             <?php foreach (
                                 $officialFields
-                                as [$field, $fieldLabel]
+                                as [$field, $fieldLabel, $fieldRequired]
                             ): ?>
 
                                 <div class="col-md-6">
 
                                     <label class="edit-label">
                                         <?= e($fieldLabel) ?>
+                                        <?php if (!$fieldRequired): ?>
+                                            <span class="text-muted fw-normal">
+                                                (optional)
+                                            </span>
+                                        <?php endif; ?>
                                     </label>
 
                                     <input
@@ -4150,7 +4169,7 @@ require_once __DIR__ . '/../includes/header.php';
                                                 $official[$field] ?? ''
                                             )
                                         ) ?>"
-                                        required
+                                        <?= $fieldRequired ? 'required' : '' ?>
                                     >
 
                                 </div>
@@ -4864,6 +4883,28 @@ require_once __DIR__ . '/../includes/header.php';
 
 })();
 </script>
+
+
+<!-- ==========================================================
+     COUNTY / SUB-COUNTY / POSTAL CODE SUGGESTIONS
+
+     Same data and same script as the create wizard, so a record
+     edited here gets the same spellings it was captured with.
+     The fields stay free text; this only proposes values.
+     ========================================================== -->
+
+<script>
+window.KENYA_LOCATIONS = <?= json_encode(
+    [
+        'counties'    => kenyaCounties($connection),
+        'subCounties' => kenyaSubCountyMap($connection),
+        'postal'      => kenyaPostalCodes($connection),
+    ],
+    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP
+) ?>;
+</script>
+
+<script src="/pbo-portal/assets/js/location-suggest.js"></script>
 
 <?php
 require_once __DIR__ . '/../includes/footer.php';

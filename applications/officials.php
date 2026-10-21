@@ -110,8 +110,8 @@ function officialLabel(string $designation): string
 {
     return match (strtoupper($designation)) {
         'CHAIRPERSON' => 'Chairperson',
-        'TREASURER' => 'Treasurer',
         'SECRETARY' => 'Secretary',
+        'TREASURER' => 'Treasurer',
         'DIRECTOR' => 'Director',
         default => ucwords(
             strtolower(
@@ -686,7 +686,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     | Full validation for Save & Continue
     |--------------------------------------------------------------------------
     |
-    | Only Chairperson, Treasurer and Secretary are mandatory.
+    | Only Chairperson, Secretary and Treasurer are mandatory.
+    |
+    | KRA PIN is NOT required. Plenty of officials genuinely have none -
+    | foreign nationals serving on the boards of international organizations
+    | being the common case - and forcing the field only taught staff to
+    | invent a number to get past the page.
+    |
+    | Email is required for the Chairperson only. The Chairperson is the
+    | contact of record for the application; the Secretary and Treasurer
+    | often share an organization address or have no individual one.
     |
     */
 
@@ -703,15 +712,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'id_passport_number'
                 => 'ID / Passport Number',
 
-            'kra_pin'
-                => 'KRA PIN',
-
             'phone_number'
                 => 'Phone Number',
-
-            'email'
-                => 'Email',
         ];
+
+        /* Required for the Chairperson, optional for the other two. */
+        $emailRequiredFor = ['CHAIRPERSON'];
 
 
         /*
@@ -723,8 +729,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         foreach (
             [
                 $chairperson,
-                $treasurer,
                 $secretary,
+                $treasurer,
             ]
             as $record
         ) {
@@ -734,8 +740,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $record['designation']
                 );
 
+            $checkFields = $requiredFields;
+
+            if (
+                in_array(
+                    strtoupper((string) $record['designation']),
+                    $emailRequiredFor,
+                    true
+                )
+            ) {
+                $checkFields['email'] = 'Email';
+            }
+
             foreach (
-                $requiredFields
+                $checkFields
                 as $field => $fieldLabel
             ) {
 
@@ -788,8 +806,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'Director ' .
                 ($index + 1);
 
+            /*
+            | A Director is optional, but a Director who IS entered is
+            | reachable: email stays required here. KRA PIN does not - same
+            | reason as above.
+            */
+            $directorFields = $requiredFields + ['email' => 'Email'];
+
             foreach (
-                $requiredFields
+                $directorFields
                 as $field => $fieldLabel
             ) {
 
@@ -2020,7 +2045,7 @@ require_once __DIR__ .
                     </h2>
 
                     <p>
-                        Chairperson, Treasurer and Secretary are required.
+                        Chairperson, Secretary and Treasurer are required.
                     </p>
 
                 </div>
@@ -2032,8 +2057,8 @@ require_once __DIR__ .
 
                 Complete the required particulars for the
                 <strong>Chairperson</strong>,
-                <strong>Treasurer</strong> and
-                <strong>Secretary</strong>.
+                <strong>Secretary</strong> and
+                <strong>Treasurer</strong>.
 
                 Signatures are
                 <strong>optional</strong> and may be uploaded
@@ -2054,16 +2079,16 @@ require_once __DIR__ .
                 'record' => $chairperson,
             ],
 
-            'treasurer' => [
-                'number' => '2',
-                'title' => 'Treasurer',
-                'record' => $treasurer,
-            ],
-
             'secretary' => [
-                'number' => '3',
+                'number' => '2',
                 'title' => 'Secretary',
                 'record' => $secretary,
+            ],
+
+            'treasurer' => [
+                'number' => '3',
+                'title' => 'Treasurer',
+                'record' => $treasurer,
             ],
         ];
 
@@ -2206,7 +2231,7 @@ require_once __DIR__ .
 
                         <label>
                             KRA PIN
-                            <span class="required">*</span>
+                            <span class="optional-note">(if any)</span>
                         </label>
 
                         <input
@@ -2221,7 +2246,7 @@ require_once __DIR__ .
                                     'kra_pin'
                                 ]
                             ) ?>"
-                            required
+                            placeholder="Leave blank if the official has none"
                         >
 
                     </div>
@@ -2255,9 +2280,22 @@ require_once __DIR__ .
 
                     <div class="form-group">
 
+                        <?php
+                        /*
+                        | The Chairperson is the contact of record, so that
+                        | address is required. The Secretary and Treasurer
+                        | frequently have no individual address.
+                        */
+                        $emailIsRequired = $formKey === 'chairperson';
+                        ?>
+
                         <label>
                             Email
-                            <span class="required">*</span>
+                            <?php if ($emailIsRequired): ?>
+                                <span class="required">*</span>
+                            <?php else: ?>
+                                <span class="optional-note">(optional)</span>
+                            <?php endif; ?>
                         </label>
 
                         <input
@@ -2269,7 +2307,7 @@ require_once __DIR__ .
                                     'email'
                                 ]
                             ) ?>"
-                            required
+                            <?= $emailIsRequired ? 'required' : '' ?>
                         >
 
                     </div>

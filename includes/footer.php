@@ -93,6 +93,8 @@
 
 </footer>
 
+<!-- Adds the show/hide button to any password box on the page. -->
+<script src="/pbo-portal/assets/js/password-reveal.js" defer></script>
 
 </body>
 

@@ -959,7 +959,7 @@ if (
 | Principal Officials
 |--------------------------------------------------------------------------
 |
-| Only Chairperson, Treasurer and Secretary are required.
+| Only Chairperson, Secretary and Treasurer are required.
 | Signatures are NOT required.
 |
 */
@@ -3107,7 +3107,7 @@ require_once __DIR__ .
                         </h2>
 
                         <p>
-                            Chairperson, Treasurer and Secretary.
+                            Chairperson, Secretary and Treasurer.
                         </p>
 
                     </div>
@@ -3135,8 +3135,8 @@ require_once __DIR__ .
                     <?php foreach (
                         [
                             'CHAIRPERSON',
-                            'TREASURER',
                             'SECRETARY',
+                            'TREASURER',
                         ]
                         as $designation
                     ): ?>

@@ -10,3 +10,4 @@
 </p>
 
 <script src="/pbo-portal/assets/js/login-network.js" defer></script>
+<script src="/pbo-portal/assets/js/password-reveal.js" defer></script>

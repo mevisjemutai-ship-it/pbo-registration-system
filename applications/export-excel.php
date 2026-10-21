@@ -1910,7 +1910,7 @@ Selected Financial Year
 5. Principal Officials
 
 <span class="section-subtitle">
-Chairperson, Treasurer and Secretary
+Chairperson, Secretary and Treasurer
 </span>
 
 </td>
@@ -1923,8 +1923,8 @@ Chairperson, Treasurer and Secretary
 <?php foreach (
     [
         'CHAIRPERSON',
-        'TREASURER',
         'SECRETARY',
+        'TREASURER',
     ] as $designation
 ): ?>
 
