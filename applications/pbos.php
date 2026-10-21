@@ -1325,13 +1325,30 @@ require_once __DIR__ .
 }
 
 
+/*
+| Column widths, by position. These are tied to the number of columns in
+| the table: adding the selection column at the front shifted every rule
+| along one, which left the Organization Name column with no width at all
+| and collapsed it to nothing. If a column is ever added or removed here,
+| these four rules have to move with it.
+|
+|   1  selection tick   2  registration number
+|   3  organization name (takes the slack)
+|   4  date of registration
+*/
+
 .registry-table th:first-child {
-    width: 22%;
+    width: 44px;
 }
 
 
 .registry-table th:nth-child(2) {
-    width: 58%;
+    width: 22%;
+}
+
+
+.registry-table th:nth-child(3) {
+    width: 56%;
 }
 
 
