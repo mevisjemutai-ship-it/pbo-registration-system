@@ -268,6 +268,34 @@ check('full: foreign tax number labelled as such, not as a KRA PIN',
 check('full: Kenyan official keeps the KRA PIN label',
     has($full, 'KRA PIN') && has($full, 'A001234567X'));
 
+echo "\nExcel reads it properly\n";
+
+foreach (['complete record' => $full, 'sparse record' => $sparse] as $label => $output) {
+
+    /* A label and its value in one cell arrive as "CountyBaringo". */
+    check($label . ': label and value are in separate cells',
+        !preg_match('/<td[^>]*>\s*<span class="label">/', $output));
+
+    /* Excel sizes columns from <col width> in pixels. */
+    check($label . ': column widths are declared in pixels',
+        has($output, '<col width="58"'));
+
+    /* 0111053310 becomes 111053310 unless the cell is marked as text. */
+    check($label . ': value cells are marked as text for Excel',
+        substr_count($output, 'mso-number-format') > 10);
+}
+
+/* The masthead was arriving crushed into cell A1. */
+/* Count the cells, not the words - the stylesheet names them too. */
+check('masthead authority, title and name are three separate rows',
+    substr_count($full, 'class="cover-authority"') === 1
+    && substr_count($full, 'class="cover-title"') === 1
+    && substr_count($full, 'class="cover-name"') === 1);
+
+/* Chips put every purpose in one cell: "Education Poverty Eradication Hiv Aids". */
+check('each objective is on its own row',
+    !has($full, 'class="chip"'));
+
 echo "\nThe grid holds\n";
 
 foreach (['complete record' => $full, 'sparse record' => $sparse] as $label => $output) {

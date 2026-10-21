@@ -339,11 +339,15 @@ check('no em dash anywhere in the list export',
     !has($all, '&mdash;') && !has($all, "\u{2014}"));
 
 /* An empty labelled box is the same problem as a dash. */
-/* Match the rendered label, not the words - a CSS comment mentions them. */
-check('no Alternative Phone box when there is no alternative phone',
-    !has($details, 'class="label">Alternative Phone<'));
-check('the Phone box that DOES have a value is still there',
-    has($details, 'class="label">Phone<'));
+/*
+| Match the rendered label cell, not the words: a CSS comment mentions
+| them, and a label now lives in its own cell rather than a span, because
+| Excel runs stacked spans together into one string.
+*/
+check('no Alternative Telephone box when there is none recorded',
+    !has($details, '>Alternative Telephone<'));
+check('the Telephone box that DOES have a value is still there',
+    has($details, '>Telephone<'));
 
 /* Codes are for the database, not for a supervisor reading a printout. */
 check('objective printed as a label, not a code',
@@ -353,7 +357,29 @@ check('beneficiary printed as a label, not a code',
 
 /* The organization name is introduced rather than left bare. */
 check('organization name carries its own label',
-    has($details, 'Name of Organization') && has($details, 'Amani Children Trust'));
+    has($details, 'NAME OF ORGANIZATION') && has($details, 'Amani Children Trust'));
+
+echo "\nExcel reads it properly\n";
+
+/*
+| The faults the real Excel screenshots showed, each as a check.
+*/
+
+/* A label and its value in one cell arrive as "Registration Number20397". */
+check('label and value are in separate cells',
+    !preg_match('/<td[^>]*>[^<]*<span class="label">/', $details));
+
+/* Excel sizes columns from <col width> in pixels; a percentage says nothing. */
+check('column widths are declared in pixels',
+    has($details, '<col width="58"'));
+
+/* Phone numbers lose their leading zero unless the cell is marked as text. */
+check('value cells are marked as text for Excel',
+    substr_count($details, 'mso-number-format') > 10);
+
+/* The masthead was ending up crushed into cell A1. */
+check('masthead is three rows, not one cell',
+    has($details, 'cover-authority') && has($details, 'cover-title'));
 
 echo "\n{$pass} passed, {$fail} failed\n";
 

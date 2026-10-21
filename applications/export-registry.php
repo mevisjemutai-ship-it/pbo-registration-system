@@ -33,6 +33,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/excel-layout.php';
 require_once __DIR__ . '/../includes/official-rules.php';
 require_once __DIR__ . '/../includes/pbo-registry-filters.php';
 require_once __DIR__ . '/../includes/application-labels.php';
@@ -50,36 +51,26 @@ if (!$connection instanceof PDO) {
 
 /*
 |--------------------------------------------------------------------------
-| The grid
+| Layout
 |--------------------------------------------------------------------------
 |
-| Twelve columns divides cleanly into halves, thirds and quarters, which
-| covers every layout below.
+| The grid, the cells, the labels and the stylesheet come from
+| includes/excel-layout.php, which this export and the per-application
+| record now share. They had been drifting apart: a fix made to one and
+| forgotten in the other is how the register went on printing dashes
+| after they had been taken out of the record.
+|
+| What matters there, and does not show until the file is opened in
+| Excel: a label and its value go in SEPARATE cells (Excel ignores
+| display:block, so stacked spans arrive as "Registration Number20397"),
+| column widths are in pixels, and every value is marked as text so a
+| telephone number keeps its leading zero.
+|
 */
 
-const GRID_COLUMNS = 12;
-
-/** How many organizations one export may carry. */
+/** How many organizations one details export may carry. */
 const MAX_DETAIL_RECORDS = 300;
 
-
-function e(?string $value): string
-{
-    return htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-}
-
-/*
-| Nothing recorded prints as nothing.
-|
-| This used to return an em dash. A dash in a cell reads as a value, and a
-| column of them reads as a record somebody filled in badly - when usually
-| the field simply does not apply. An empty cell says the same thing
-| without the accusation.
-*/
-function value(mixed $raw): string
-{
-    return e(trim((string) $raw));
-}
 
 function typeLabel(string $type): string
 {
@@ -87,11 +78,12 @@ function typeLabel(string $type): string
         ?? ucwords(strtolower(str_replace('_', ' ', $type)));
 }
 
+
 function prettyDate(?string $value): string
 {
     $value = trim((string) $value);
 
-    if ($value === '' || $value === '0000-00-00') {
+    if ($value === '' || str_starts_with($value, '0000-00-00')) {
         return '';
     }
 
@@ -99,6 +91,7 @@ function prettyDate(?string $value): string
 
     return $date === false ? $value : $date->format('j M Y');
 }
+
 
 function monthName(mixed $month): string
 {
@@ -111,77 +104,14 @@ function monthName(mixed $month): string
     return DateTimeImmutable::createFromFormat('!m', (string) $month)->format('F');
 }
 
-/**
- * One label-and-value cell, or nothing at all when there is no value.
- *
- * A labelled box with nothing in it is the same problem as a dash: it
- * reads as a field somebody failed to complete, when usually it simply
- * does not apply. If there is no alternative phone number, there is no
- * Alternative Phone box.
- */
-function field(string $label, mixed $raw, int $span = 4): string
+
+/** Join the parts that have something in them. */
+function joined(array $values, string $separator = ' '): string
 {
-    $raw = trim((string) $raw);
-
-    if ($raw === '') {
-        return '';
-    }
-
-    return '<td colspan="' . $span . '">'
-        . '<span class="label">' . e($label) . '</span>'
-        . '<span class="value">' . nl2br(e($raw)) . '</span>'
-        . '</td>';
-}
-
-/**
- * Lay fields out in rows, skipping the empty ones and padding the last
- * row back out to the full grid - a row that stops short pulls every
- * section beneath it out of alignment in Excel.
- */
-function fieldRows(array $fields, int $span = 4): string
-{
-    $cells = [];
-
-    foreach ($fields as $label => $raw) {
-        $cell = field((string) $label, $raw, $span);
-
-        if ($cell !== '') {
-            $cells[] = $cell;
-        }
-    }
-
-    if ($cells === []) {
-        return '';
-    }
-
-    $perRow = intdiv(GRID_COLUMNS, $span);
-    $html = '';
-
-    foreach (array_chunk($cells, $perRow) as $row) {
-        $html .= '<tr>' . implode('', $row);
-
-        $short = GRID_COLUMNS - (count($row) * $span);
-
-        if ($short > 0) {
-            $html .= '<td colspan="' . $short . '" class="pad"></td>';
-        }
-
-        $html .= '</tr>';
-    }
-
-    return $html;
-}
-
-/** The one colgroup every table repeats, so Excel builds a single grid. */
-function grid(): string
-{
-    $html = '<colgroup>';
-
-    for ($i = 0; $i < GRID_COLUMNS; $i++) {
-        $html .= '<col style="width:' . round(100 / GRID_COLUMNS, 4) . '%">';
-    }
-
-    return $html . '</colgroup>';
+    return implode($separator, array_filter(
+        array_map(static fn ($v) => trim((string) $v), $values),
+        static fn ($v) => $v !== ''
+    ));
 }
 
 
@@ -366,153 +296,13 @@ if ($format === 'excel') {
 <title>List of Public Benefit Organizations</title>
 
 <style>
-
-/*
-| A4 portrait with the same margins on every page, so a printed section
-| lines up with the one before it.
-*/
-@page {
-    size: A4 portrait;
-    margin: 0.5in;
-}
-
-body {
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 10pt;
-    color: #172b3a;
-    margin: 0;
-    padding: 0;
-}
-
-/*
-| Every table is the full width of the page and uses the same fixed
-| column grid. table-layout: fixed is what makes the browser honour the
-| colgroup instead of resizing columns to fit their contents - which is
-| what made sections print at different widths.
-*/
-table {
-    width: 100%;
-    border-collapse: collapse;
-    table-layout: fixed;
-    margin: 0;
-}
-
-td, th {
-    border: 1px solid #d7e1e8;
-    padding: 6px 8px;
-    vertical-align: top;
-    word-wrap: break-word;
-    overflow-wrap: break-word;
-    font-size: 9.5pt;
-}
-
-th {
-    background: #eef3f7;
-    font-size: 8.5pt;
-    text-transform: uppercase;
-    letter-spacing: .04em;
-    text-align: left;
-}
-
-.masthead td {
-    background: #123f67;
-    color: #ffffff;
-    border-color: #123f67;
-    padding: 14px 12px;
-}
-
-.masthead-authority { font-size: 8.5pt; font-weight: bold; letter-spacing: .08em; }
-.masthead-title { font-size: 17pt; font-weight: bold; }
-.masthead-note { font-size: 9pt; }
-
-.section-title td {
-    background: #123f67;
-    color: #ffffff;
-    border-color: #123f67;
-    font-size: 11pt;
-    font-weight: bold;
-    padding: 7px 10px;
-}
-
-.subsection td {
-    background: #f6f9fb;
-    border-top: 2px solid #d69a18;
-    font-weight: bold;
-    font-size: 9pt;
-    text-transform: uppercase;
-    letter-spacing: .04em;
-    color: #4a5a68;
-}
-
-/*
-| Labels were disappearing against the values - "Alternative Phone" and
-| "Other Areas of Operation" in particular. Bolder and darker, not bigger:
-| the value is still the thing being read, the label just has to hold its
-| own beside it.
-*/
-/* Pads a short row out to the full grid; it is there for the grid, not
-   for the reader, so it carries nothing. */
-.pad {
-    border-color: #ffffff;
-    background: #ffffff;
-}
-
-.label {
-    display: block;
-    color: #41535f;
-    font-size: 8pt;
-    font-weight: bold;
-    text-transform: uppercase;
-    letter-spacing: .06em;
-    margin-bottom: 2px;
-}
-
-.value {
-    display: block;
-    font-weight: bold;
-    font-size: 10pt;
-    color: #16242f;
-}
-
-.strong { font-weight: bold; }
-.spacer td { border: 0; height: 10px; padding: 0; }
-.muted { color: #8a949d; }
-
-/*
-| Short values sit centred in their column; addresses, descriptions and
-| names stay left, because centred prose is hard to read down a page.
-*/
-td, th { text-align: center; }
-.left, th.left { text-align: left; }
-
-/* The name of the organization, with its label above it. */
-.record-name td {
-    background: #0f3c5f;
-    border-color: #0f3c5f;
-    color: #ffffff;
-    padding: 12px 14px;
-    text-align: left;
-}
-
-.record-name .label {
-    color: #9dc4e0;
-}
-
-.record-name .name {
-    display: block;
-    font-size: 15pt;
-    font-weight: bold;
-    line-height: 1.2;
-}
-
-/* Each organization starts a new sheet of paper in details mode. */
-.record { page-break-before: always; }
-.record:first-of-type { page-break-before: auto; }
+<?= xlStyles() ?>
 
 /* The print view only: a toolbar that never reaches the paper. */
 .toolbar {
-    padding: 10px 14px;
-    background: #123f67;
+    width: 696px;
+    padding: 10px 12px;
+    background: #0f3c5f;
     color: #fff;
     font-size: 11pt;
 }
@@ -529,10 +319,13 @@ td, th { text-align: center; }
     cursor: pointer;
 }
 
+/* Each organization starts a new sheet of paper in details mode. */
+.record { page-break-before: always; }
+.record:first-of-type { page-break-before: auto; }
+
 @media print {
     .toolbar { display: none; }
 }
-
 </style>
 
 </head>
@@ -541,231 +334,237 @@ td, th { text-align: center; }
 
 <?php if ($format === 'print'): ?>
     <div class="toolbar">
-        <?= e($description) ?>
+        <?= xl($description) ?>
         <button type="button" onclick="window.print()">Print</button>
         <button type="button" onclick="window.close()">Close</button>
     </div>
 <?php endif; ?>
 
 
-<table class="masthead">
-    <?= grid() ?>
-    <tr>
-        <td colspan="<?= GRID_COLUMNS ?>">
-            <div class="masthead-authority">
-                PUBLIC BENEFIT ORGANIZATIONS REGULATORY AUTHORITY
-            </div>
-            <div class="masthead-title">
-                List of Public Benefit Organizations
-            </div>
-            <div class="masthead-note">
-                <?= e($description) ?>
-                &nbsp;&middot;&nbsp;
-                <?= count($records) ?>
-                record<?= count($records) === 1 ? '' : 's' ?>
-                &nbsp;&middot;&nbsp;
-                Produced <?= e(date('j M Y')) ?>
-            </div>
-        </td>
-    </tr>
+<!-- ==========================================================
+     MASTHEAD
+
+     One row each. Stacked spans in a single cell arrive in Excel
+     as one run-together string.
+     ========================================================== -->
+
+<table class="cover">
+<?= xlGrid() ?>
+<tr><td colspan="<?= XL_GRID ?>" class="cover-authority">PUBLIC BENEFIT ORGANIZATIONS REGULATORY AUTHORITY</td></tr>
+<tr><td colspan="<?= XL_GRID ?>" class="cover-title">List of Public Benefit Organizations</td></tr>
+<tr><td colspan="<?= XL_GRID ?>" class="cover-name">
+    <?= xl($description) ?>
+    &nbsp;&nbsp;&middot;&nbsp;&nbsp;
+    <?= count($records) ?> record<?= count($records) === 1 ? '' : 's' ?>
+    &nbsp;&nbsp;&middot;&nbsp;&nbsp;
+    Produced <?= xl(date('j M Y')) ?>
+</td></tr>
 </table>
 
 <?php if ($truncated): ?>
     <table>
-        <?= grid() ?>
-        <tr>
-            <td colspan="<?= GRID_COLUMNS ?>" class="strong">
-                This export stops at <?= MAX_DETAIL_RECORDS ?> organizations.
-                Narrow the filters and export the rest separately.
-            </td>
-        </tr>
+    <?= xlGrid() ?>
+    <tr><td colspan="<?= XL_GRID ?>" class="v">
+        This export stops at <?= MAX_DETAIL_RECORDS ?> organizations.
+        Narrow the filters and export the rest separately.
+    </td></tr>
     </table>
 <?php endif; ?>
 
 <?php if ($records === []): ?>
 
     <table>
-        <?= grid() ?>
-        <tr>
-            <td colspan="<?= GRID_COLUMNS ?>" class="muted">
-                No organizations match this selection.
-            </td>
-        </tr>
+    <?= xlGrid() ?>
+    <tr><td colspan="<?= XL_GRID ?>" class="v plain">
+        No organizations match this selection.
+    </td></tr>
     </table>
 
 <?php elseif ($mode === 'list'): ?>
 
-    <table class="spacer"><?= grid() ?><tr><td colspan="<?= GRID_COLUMNS ?>"></td></tr></table>
+    <?= xlGap() ?>
 
     <table>
-        <?= grid() ?>
-        <tr>
-            <th colspan="1">#</th>
-            <th colspan="2">Registration No.</th>
-            <th colspan="5" class="left">Name of Organization</th>
-            <th colspan="2">Type</th>
-            <th colspan="2">Registered</th>
-        </tr>
+    <?= xlGrid() ?>
+    <tr>
+        <?= xlHeading('#', 1) ?>
+        <?= xlHeading('Registration Number', 3, 'left') ?>
+        <?= xlHeading('Name of Organization', 4, 'left') ?>
+        <?= xlHeading('Type', 2) ?>
+        <?= xlHeading('Registered', 2) ?>
+    </tr>
 
-        <?php foreach ($records as $index => $record): ?>
-            <tr>
-                <td colspan="1"><?= $index + 1 ?></td>
-                <td colspan="2"><?= value($record['pbo_registration_number']) ?></td>
-                <td colspan="5" class="strong left"><?= value($record['pbo_name']) ?></td>
-                <td colspan="2"><?= value(typeLabel((string) $record['registration_type'])) ?></td>
-                <td colspan="2"><?= value(prettyDate($record['registration_date'])) ?></td>
-            </tr>
-        <?php endforeach; ?>
+    <?php foreach ($records as $index => $record): ?>
+        <tr>
+            <?= xlCell((string) ($index + 1), 1, 'v plain c') ?>
+            <?= xlCell($record['pbo_registration_number'], 3, 'v plain') ?>
+            <?= xlCell($record['pbo_name'], 4) ?>
+            <?= xlCell(typeLabel((string) $record['registration_type']), 2, 'v plain c') ?>
+            <?= xlCell(prettyDate($record['registration_date']), 2, 'v plain c') ?>
+        </tr>
+    <?php endforeach; ?>
     </table>
 
 <?php else: ?>
 
     <?php foreach ($records as $record): ?>
 
-        <?php $id = (int) $record['id']; ?>
+        <?php
+        $id = (int) $record['id'];
+        $address = $addresses[$id] ?? [];
+
+        $start = monthName($record['financial_year_start_month']);
+        $end = monthName($record['financial_year_end_month']);
+        ?>
 
         <div class="record">
 
-            <table class="spacer"><?= grid() ?><tr><td colspan="<?= GRID_COLUMNS ?>"></td></tr></table>
+            <?= xlGap() ?>
 
-            <table>
-                <?= grid() ?>
-                <tr class="record-name">
-                    <td colspan="<?= GRID_COLUMNS ?>">
-                        <span class="label">Name of Organization</span>
-                        <span class="name"><?= value($record['pbo_name']) ?></span>
-                    </td>
-                </tr>
-                <?php
-                $start = monthName($record['financial_year_start_month']);
-                $end = monthName($record['financial_year_end_month']);
-                ?>
-
-                <?= fieldRows([
-                    'Registration Number' => $record['pbo_registration_number'],
-                    'Date of Registration' => prettyDate($record['registration_date']),
-                    'Type' => typeLabel((string) $record['registration_type']),
-                    'Application Reference' => $record['application_reference'],
-                    'Financial Year' => $start !== '' && $end !== '' ? $start . ' to ' . $end : '',
-                    'Submitted' => prettyDate(substr((string) $record['submitted_at'], 0, 10)),
-                ], 4) ?>
+            <!-- The name, introduced rather than left bare. -->
+            <table class="cover">
+            <?= xlGrid() ?>
+            <tr><td colspan="<?= XL_GRID ?>" class="cover-authority">NAME OF ORGANIZATION</td></tr>
+            <tr><td colspan="<?= XL_GRID ?>" class="cover-title" style="font-size:15pt"><?= xl($record['pbo_name']) ?></td></tr>
             </table>
 
-            <?php $address = $addresses[$id] ?? null; ?>
-
             <table>
-                <?= grid() ?>
-                <tr class="subsection">
-                    <td colspan="<?= GRID_COLUMNS ?>">Head Office</td>
-                </tr>
-                <?= fieldRows([
-                    'County' => $address['county'] ?? '',
-                    'Sub-County' => $address['sub_county'] ?? '',
-                    'Postal Code' => $address['postal_code'] ?? '',
-                    'Physical Address' => $address['physical_address'] ?? '',
-                    'Postal Address' => $address['postal_address'] ?? '',
-                    'Phone' => $address['phone_number'] ?? '',
-                    'Alternative Phone' => $address['alternative_phone_number'] ?? '',
-                    'Email' => $address['email'] ?? '',
-                ], 4) ?>
+            <?= xlGrid() ?>
+            <?= xlFields([
+                'Registration Number' => $record['pbo_registration_number'],
+                'Date of Registration' => prettyDate($record['registration_date']),
+                'Type' => typeLabel((string) $record['registration_type']),
+                'Application Reference' => $record['application_reference'],
+                'Financial Year' => $start !== '' && $end !== '' ? $start . ' to ' . $end : '',
+                'Submitted' => prettyDate(substr((string) $record['submitted_at'], 0, 10)),
+            ], 2) ?>
             </table>
+
+            <?php
+            $headOffice = xlFields([
+                'County' => $address['county'] ?? '',
+                'Sub-County' => $address['sub_county'] ?? '',
+                'Postal Code' => $address['postal_code'] ?? '',
+                'Physical Address' => $address['physical_address'] ?? '',
+                'Postal Address' => $address['postal_address'] ?? '',
+                'Telephone' => $address['phone_number'] ?? '',
+                'Alternative Telephone' => $address['alternative_phone_number'] ?? '',
+                'Email' => $address['email'] ?? '',
+            ], 2);
+            ?>
+
+            <?php if ($headOffice !== ''): ?>
+                <table>
+                <?= xlGrid() ?>
+                <?= xlSub('Head Office') ?>
+                <?= $headOffice ?>
+                </table>
+            <?php endif; ?>
 
             <?php if (!empty($locations[$id])): ?>
                 <table>
-                    <?= grid() ?>
-                    <tr class="subsection">
-                        <td colspan="<?= GRID_COLUMNS ?>">
-                            Other Areas of Operation
-                            (<?= count($locations[$id]) ?>)
-                        </td>
-                    </tr>
+                <?= xlGrid() ?>
+                <?= xlSub(
+                    'Other Areas of Operation',
+                    count($locations[$id]) . (count($locations[$id]) === 1 ? ' county' : ' counties')
+                ) ?>
+                <tr>
+                    <?= xlHeading('County', 3, 'left') ?>
+                    <?= xlHeading('Sub-County', 2, 'left') ?>
+                    <?= xlHeading('Physical Address', 4, 'left') ?>
+                    <?= xlHeading('Telephone', 3) ?>
+                </tr>
+                <?php foreach ($locations[$id] as $location): ?>
                     <tr>
-                        <th colspan="3" class="left">County</th>
-                        <th colspan="3">Sub-County</th>
-                        <th colspan="4" class="left">Physical Address</th>
-                        <th colspan="2">Phone</th>
+                        <?= xlCell($location['county'], 3) ?>
+                        <?= xlCell($location['sub_county'], 2, 'v plain') ?>
+                        <?= xlCell($location['physical_address'], 4, 'v plain') ?>
+                        <?= xlCell($location['phone_number'], 3, 'v plain c') ?>
                     </tr>
-                    <?php foreach ($locations[$id] as $location): ?>
-                        <tr>
-                            <td colspan="3" class="strong left"><?= value($location['county']) ?></td>
-                            <td colspan="3"><?= value($location['sub_county']) ?></td>
-                            <td colspan="4" class="left"><?= value($location['physical_address']) ?></td>
-                            <td colspan="2"><?= value($location['phone_number']) ?></td>
-                        </tr>
-                    <?php endforeach; ?>
+                <?php endforeach; ?>
                 </table>
             <?php endif; ?>
 
             <?php if (!empty($objectives[$id])): ?>
                 <table>
-                    <?= grid() ?>
-                    <tr class="subsection">
-                        <td colspan="<?= GRID_COLUMNS ?>">Objectives</td>
+                <?= xlGrid() ?>
+                <?= xlSub('Objectives') ?>
+                <?php
+                /*
+                | Most purposes carry no note. A column of empty cells
+                | beside them is the same problem as a dash, so it only
+                | appears when at least one row has something in it.
+                */
+                $anyNote = array_filter(
+                    array_column($objectives[$id], 'description'),
+                    'xlFilled'
+                ) !== [];
+                ?>
+                <?php foreach ($objectives[$id] as $index => $objective): ?>
+                    <tr>
+                        <?= xlCell((string) ($index + 1), 1, 'v plain c') ?>
+                        <?= xlCell(
+                            pboCodeLabel((string) $objective['objective_code'], pboObjectiveLabels()),
+                            $anyNote ? 5 : 11
+                        ) ?>
+                        <?= $anyNote ? xlCell($objective['description'], 6, 'v plain') : '' ?>
                     </tr>
-                    <?php foreach ($objectives[$id] as $objective): ?>
-                        <tr>
-                            <td colspan="4" class="strong">
-                                <?= e(pboCodeLabel(
-                                    (string) $objective['objective_code'],
-                                    pboObjectiveLabels()
-                                )) ?>
-                            </td>
-                            <td colspan="8" class="left"><?= value($objective['description']) ?></td>
-                        </tr>
-                    <?php endforeach; ?>
+                <?php endforeach; ?>
                 </table>
             <?php endif; ?>
 
             <?php if (!empty($beneficiaries[$id])): ?>
                 <table>
-                    <?= grid() ?>
-                    <tr class="subsection">
-                        <td colspan="<?= GRID_COLUMNS ?>">Beneficiaries</td>
+                <?= xlGrid() ?>
+                <?= xlSub('Beneficiaries') ?>
+                <?php
+                $anyNote = array_filter(
+                    array_column($beneficiaries[$id], 'description'),
+                    'xlFilled'
+                ) !== [];
+                ?>
+                <?php foreach ($beneficiaries[$id] as $index => $beneficiary): ?>
+                    <tr>
+                        <?= xlCell((string) ($index + 1), 1, 'v plain c') ?>
+                        <?= xlCell(
+                            pboCodeLabel((string) $beneficiary['beneficiary_code'], pboBeneficiaryLabels()),
+                            $anyNote ? 5 : 11
+                        ) ?>
+                        <?= $anyNote ? xlCell($beneficiary['description'], 6, 'v plain') : '' ?>
                     </tr>
-                    <?php foreach ($beneficiaries[$id] as $beneficiary): ?>
-                        <tr>
-                            <td colspan="4" class="strong">
-                                <?= e(pboCodeLabel(
-                                    (string) $beneficiary['beneficiary_code'],
-                                    pboBeneficiaryLabels()
-                                )) ?>
-                            </td>
-                            <td colspan="8" class="left"><?= value($beneficiary['description']) ?></td>
-                        </tr>
-                    <?php endforeach; ?>
+                <?php endforeach; ?>
                 </table>
             <?php endif; ?>
 
             <?php if (!empty($officials[$id])): ?>
                 <table>
-                    <?= grid() ?>
-                    <tr class="subsection">
-                        <td colspan="<?= GRID_COLUMNS ?>">Officials and Directors</td>
-                    </tr>
+                <?= xlGrid() ?>
+                <?= xlSub('Officials and Directors') ?>
+                <tr>
+                    <?= xlHeading('Position', 2, 'left') ?>
+                    <?= xlHeading('Name', 3, 'left') ?>
+                    <?= xlHeading('Nationality', 2) ?>
+                    <?= xlHeading('ID / Passport', 2) ?>
+                    <?= xlHeading('Tax Identification', 3, 'left') ?>
+                </tr>
+                <?php foreach ($officials[$id] as $official): ?>
+                    <?php $tax = officialTaxIdDisplay($official); ?>
                     <tr>
-                        <th colspan="2">Position</th>
-                        <th colspan="3" class="left">Name</th>
-                        <th colspan="2">Nationality</th>
-                        <th colspan="2">ID / Passport</th>
-                        <th colspan="3">Tax ID</th>
+                        <?= xlCell(
+                            ucwords(strtolower((string) $official['designation'])),
+                            2,
+                            'v plain'
+                        ) ?>
+                        <?= xlCell($official['full_name'], 3) ?>
+                        <?= xlCell($official['nationality'], 2, 'v plain c') ?>
+                        <?= xlCell($official['id_passport_number'], 2, 'v plain c') ?>
+                        <?= xlCell(
+                            $tax === null ? '' : $tax['label'] . ': ' . $tax['value'],
+                            3,
+                            'v plain'
+                        ) ?>
                     </tr>
-                    <?php foreach ($officials[$id] as $official): ?>
-                        <?php $tax = officialTaxIdDisplay($official); ?>
-                        <tr>
-                            <td colspan="2">
-                                <?= value(ucwords(strtolower((string) $official['designation']))) ?>
-                            </td>
-                            <td colspan="3" class="strong left"><?= value($official['full_name']) ?></td>
-                            <td colspan="2"><?= value($official['nationality']) ?></td>
-                            <td colspan="2"><?= value($official['id_passport_number']) ?></td>
-                            <td colspan="3">
-                                <?php if ($tax !== null): ?>
-                                    <span class="label"><?= e($tax['label']) ?></span>
-                                    <span class="value"><?= e($tax['value']) ?></span>
-                                <?php endif; ?>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
+                <?php endforeach; ?>
                 </table>
             <?php endif; ?>
 
@@ -774,6 +573,18 @@ td, th { text-align: center; }
     <?php endforeach; ?>
 
 <?php endif; ?>
+
+
+<table class="footnote">
+<?= xlGrid() ?>
+<tr>
+    <td colspan="<?= XL_GRID ?>">
+        Produced from the PBO Registration and Records Management System on
+        <?= xl(date('j F Y \a\t H:i')) ?>.
+        Fields the organization did not provide are not shown.
+    </td>
+</tr>
+</table>
 
 <?php if ($format === 'print'): ?>
     <script>
