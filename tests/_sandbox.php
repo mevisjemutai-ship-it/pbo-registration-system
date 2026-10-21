@@ -38,9 +38,21 @@ if (PHP_SAPI !== 'cli') {
 function sandboxCopy(string $from, string $to): void
 {
     $skipNames = ['.git', 'node_modules', 'uploads', 'storage'];
-    $skipFiles = ['database.php'];
 
     @mkdir($to, 0700, true);
+
+    /*
+    | config/ holds the database settings and the SMTP password. Nothing
+    | under test reads either, and on a properly locked-down server the
+    | mail settings are not even readable by the account running the
+    | tests - so copying them is both pointless and noisy.
+    |
+    | The directory itself is created, because the test writes its own
+    | throwaway config/database.php into it.
+    */
+    if (basename($from) === 'config') {
+        return;
+    }
 
     $entries = scandir($from);
 
@@ -68,11 +80,6 @@ function sandboxCopy(string $from, string $to): void
             continue;
         }
 
-        /* Never carry the real database settings into the sandbox. */
-        if (in_array($entry, $skipFiles, true) && basename($from) === 'config') {
-            continue;
-        }
-
         /* Database dumps are big and nothing here reads them. */
         if (str_ends_with($entry, '.sql') && basename($from) === 'database') {
             /* The migrations are small and worth having; the dumps are not. */
@@ -81,7 +88,18 @@ function sandboxCopy(string $from, string $to): void
             }
         }
 
-        copy($source, $target);
+        /*
+        | A file this account cannot read is not a reason to fail, and a
+        | raw PHP warning in the middle of a test run looks like a broken
+        | test. Skip it and say so once at the end.
+        */
+        if (!is_readable($source)) {
+            $GLOBALS['sandboxSkipped'][] = $source;
+
+            continue;
+        }
+
+        @copy($source, $target);
     }
 }
 
@@ -125,7 +143,14 @@ $sandboxTarget = sys_get_temp_dir() . '/pbo-test-' . bin2hex(random_bytes(6));
 echo "A config/database.php is present, so this installation is left alone.\n";
 echo "Running the test on a temporary copy instead.\n\n";
 
+$GLOBALS['sandboxSkipped'] = [];
+
 sandboxCopy($sandboxRoot, $sandboxTarget);
+
+if ($GLOBALS['sandboxSkipped'] !== []) {
+    echo 'Skipped ' . count($GLOBALS['sandboxSkipped'])
+        . " unreadable file(s); nothing under test reads them.\n\n";
+}
 
 register_shutdown_function(static function () use ($sandboxTarget): void {
     sandboxRemove($sandboxTarget);
