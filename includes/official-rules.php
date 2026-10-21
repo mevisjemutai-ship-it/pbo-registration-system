@@ -163,13 +163,24 @@ function officialTaxColumnsExist(PDO $connection): bool
     }
 
     try {
-        $columns = $connection
-            ->query('SHOW COLUMNS FROM application_officials')
-            ->fetchAll(PDO::FETCH_COLUMN);
+        /*
+        | Ask for the columns rather than for a list of columns: LIMIT 0
+        | fetches no rows, so this costs nothing, and it answers the
+        | question directly - can these two be selected? SHOW COLUMNS
+        | would do the same on MySQL and fail on anything else, which
+        | would quietly report "no" on a database that has them.
+        */
+        $result = $connection->query(
+            'SELECT tax_id_type, tax_id_number FROM application_officials LIMIT 0'
+        );
 
-        $exists = is_array($columns)
-            && in_array('tax_id_type', $columns, true)
-            && in_array('tax_id_number', $columns, true);
+        /*
+        | With PDO::ERRMODE_SILENT there is no exception to catch: query()
+        | simply returns false. Checking the return value as well means the
+        | answer is right whichever error mode the connection was built
+        | with.
+        */
+        $exists = $result !== false;
     } catch (PDOException $e) {
         $exists = false;
     }

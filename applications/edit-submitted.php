@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/application-validation.php';
 require_once __DIR__ . '/../includes/official-rules.php';
 require_once __DIR__ . '/../includes/kenya-locations.php';
 
@@ -1133,28 +1134,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     } else {
 
-        $date =
-            DateTimeImmutable::createFromFormat(
-                '!Y-m-d',
-                $form['registration_date']
-            );
+        /*
+         | One shared rule - see includes/application-validation.php. It
+         | rejects a day that does not exist AND a date in the future:
+         | records were found carrying 2027 and 2028.
+         */
+        $dateError = pboRegistrationDateError(
+            $form['registration_date'],
+            'Date of Registration'
+        );
 
-        $dateErrors =
-            DateTimeImmutable::getLastErrors();
-
-        if (
-            $date === false ||
-            (
-                is_array($dateErrors) &&
-                (
-                    $dateErrors['warning_count'] > 0 ||
-                    $dateErrors['error_count'] > 0
-                )
-            )
-        ) {
-
-            $errors[] =
-                'Enter a valid Date of Registration.';
+        if ($dateError !== null) {
+            $errors[] = $dateError;
         }
     }
 
@@ -3275,6 +3266,8 @@ require_once __DIR__ . '/../includes/header.php';
                             value="<?= e(
                                 $form['registration_date']
                             ) ?>"
+                            min="<?= e(PBO_EARLIEST_REGISTRATION_DATE) ?>"
+                            max="<?= e(pboTodayForInput()) ?>"
                             required
                         >
 

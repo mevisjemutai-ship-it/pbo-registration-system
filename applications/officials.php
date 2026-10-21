@@ -2050,6 +2050,14 @@ require_once __DIR__ .
         class="application-form"
         id="officials-form"
         autocomplete="off"
+        <?php
+        /*
+        | Autosave key: this page, this application. Keeping the key
+        | specific means one application's draft can never be offered
+        | back on another's page.
+        */
+        ?>
+        data-autosave="officials-<?= (int) ($applicationId ?? 0) ?>"
     >
 
         <input
@@ -4274,6 +4282,10 @@ require_once __DIR__ .
     <option value="Passport Number"></option>
 </datalist>
 
+
+
+<!-- Keeps typed input in the browser so a refused save never costs the work. -->
+<script src="/pbo-portal/assets/js/form-autosave.js" defer></script>
 
 <?php
 

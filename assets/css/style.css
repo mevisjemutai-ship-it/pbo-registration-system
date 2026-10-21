@@ -524,6 +524,170 @@ p {
     display: none !important;
 }
 
+
+/* ------------------------------------------------------------
+   Autosave offer (assets/js/form-autosave.js)
+   Appears above the form when the browser is holding work the
+   page does not show.
+   ------------------------------------------------------------ */
+
+.autosave-offer {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+
+    margin-bottom: 18px;
+    padding: 14px 16px;
+
+    background: var(--gold-light);
+    border: 1px solid #e3cf9a;
+    border-left: 4px solid var(--gold);
+    border-radius: 6px;
+
+    color: var(--text);
+    font-size: 13px;
+}
+
+.autosave-offer span {
+    flex: 1 1 260px;
+}
+
+.autosave-offer .btn {
+    padding: 7px 14px;
+    font-size: 12px;
+}
+
+
+/* ------------------------------------------------------------
+   List of PBOs: alphabet, ordering, selection and export
+   ------------------------------------------------------------ */
+
+.registry-alphabet,
+.registry-ordering {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+.registry-ordering {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 0;
+}
+
+.registry-alphabet-label {
+    margin-right: 8px;
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+}
+
+.registry-letter {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    min-width: 26px;
+    padding: 5px 8px;
+
+    border: 1px solid var(--border);
+    border-radius: 4px;
+
+    background: var(--white);
+    color: var(--text-secondary);
+
+    font-size: 11px;
+    font-weight: 700;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.registry-letter:hover {
+    border-color: var(--blue-medium);
+    color: var(--blue);
+}
+
+.registry-letter.is-active {
+    background: var(--blue);
+    border-color: var(--blue);
+    color: var(--white);
+}
+
+.registry-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+
+    margin-bottom: 14px;
+    padding: 12px 14px;
+
+    background: var(--soft-blue-grey);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+/* The scope line is the whole point of the toolbar: it says what the
+   buttons will act on BEFORE they are pressed. */
+.registry-actions-scope {
+    flex: 1 1 260px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.registry-actions-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.registry-action {
+    padding: 7px 12px;
+
+    border: 1px solid #c9d8e6;
+    border-radius: 5px;
+
+    background: var(--white);
+    color: var(--blue);
+
+    font: inherit;
+    font-size: 11px;
+    font-weight: 700;
+
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.registry-action:hover {
+    background: var(--blue-light);
+    color: var(--blue-dark);
+}
+
+.registry-action-quiet {
+    border-color: var(--border);
+    color: var(--text-muted);
+}
+
+.registry-tick-cell {
+    width: 34px;
+    text-align: center;
+    cursor: default;
+}
+
+.registry-tick-cell input {
+    accent-color: var(--blue);
+    cursor: pointer;
+    margin: 0;
+}
+
 .form-row {
     display: grid;
 

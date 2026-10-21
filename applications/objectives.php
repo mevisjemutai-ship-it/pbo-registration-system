@@ -1072,6 +1072,14 @@ require_once __DIR__ .
         action=""
         class="application-form"
         id="objectives-form"
+        <?php
+        /*
+        | Autosave key: this page, this application. Keeping the key
+        | specific means one application's draft can never be offered
+        | back on another's page.
+        */
+        ?>
+        data-autosave="objectives-<?= (int) ($applicationId ?? 0) ?>"
     >
 
         <input
@@ -1621,6 +1629,10 @@ require_once __DIR__ .
 })();
 </script>
 
+
+
+<!-- Keeps typed input in the browser so a refused save never costs the work. -->
+<script src="/pbo-portal/assets/js/form-autosave.js" defer></script>
 
 <?php
 

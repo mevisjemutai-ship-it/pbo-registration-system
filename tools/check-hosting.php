@@ -234,6 +234,112 @@ if (is_array($mail)) {
 
 /*
 |--------------------------------------------------------------------------
+| 3b. Form submission limits
+|--------------------------------------------------------------------------
+|
+| The officials page posts a lot of fields and uploads signature images.
+| Three separate limits can swallow that submission, and none of them says
+| anything on screen - which is what "it saved but not the rest of what I
+| entered" and "Access to Server denied" look like from the outside.
+|
+*/
+
+heading('3b. Form submission limits');
+
+$inputVars = (int) ini_get('max_input_vars');
+
+function toBytes(string $value): int
+{
+    $value = trim($value);
+
+    if ($value === '') {
+        return 0;
+    }
+
+    $unit = strtolower($value[strlen($value) - 1]);
+    $number = (int) $value;
+
+    return match ($unit) {
+        'g' => $number * 1024 * 1024 * 1024,
+        'm' => $number * 1024 * 1024,
+        'k' => $number * 1024,
+        default => $number,
+    };
+}
+
+$postMax = toBytes((string) ini_get('post_max_size'));
+$uploadMax = toBytes((string) ini_get('upload_max_filesize'));
+
+line('max_input_vars', (string) ($inputVars ?: 'unlimited'));
+line('post_max_size', (string) ini_get('post_max_size'));
+line('upload_max_filesize', (string) ini_get('upload_max_filesize'));
+line('max_file_uploads', (string) ini_get('max_file_uploads'));
+line('memory_limit', (string) ini_get('memory_limit'));
+line('max_execution_time', (string) ini_get('max_execution_time'));
+
+/*
+| An application operating in every county posts roughly 450 fields; a
+| generous margin on top of that is 800. Below that and PHP starts
+| DISCARDING fields past the limit, silently - the save looks fine and
+| the data is simply not there.
+*/
+if ($inputVars > 0 && $inputVars < 800) {
+    $problems[] = 'max_input_vars is ' . $inputVars . '. A full application posts several '
+        . 'hundred fields, and PHP silently discards everything past this limit - no error, '
+        . 'no warning, just missing data. Raise it to at least 3000.';
+    verdict('X', 'max_input_vars is too low: ' . $inputVars);
+} else {
+    verdict('OK', 'max_input_vars leaves room for a full application.');
+}
+
+/* post_max_size must clear the signature uploads with room to spare. */
+if ($postMax > 0 && $postMax < 16 * 1024 * 1024) {
+    $warnings[] = 'post_max_size is ' . ini_get('post_max_size') . '. The officials page can '
+        . 'carry several signature images; if a submission exceeds this, PHP throws the WHOLE '
+        . 'submission away and the page sees an empty form with no explanation. 16M or more '
+        . 'is safer.';
+}
+
+if ($uploadMax > $postMax && $postMax > 0) {
+    $problems[] = 'upload_max_filesize (' . ini_get('upload_max_filesize') . ') is larger than '
+        . 'post_max_size (' . ini_get('post_max_size') . '). A file that passes the first check '
+        . 'is still discarded by the second.';
+    verdict('X', 'upload_max_filesize exceeds post_max_size.');
+}
+
+/*
+| A web application firewall in front of PHP answers with its own 403 page
+| before the portal is reached - which is why "Access to Server denied"
+| appears in no part of the portal's own code.
+*/
+$modules = function_exists('apache_get_modules') ? apache_get_modules() : [];
+
+if ($modules !== []) {
+    $firewall = array_values(array_filter(
+        $modules,
+        static fn ($m) => str_contains($m, 'security') || str_contains($m, 'waf')
+    ));
+
+    line('Apache modules loaded', (string) count($modules));
+
+    if ($firewall !== []) {
+        $warnings[] = 'A web application firewall is loaded (' . implode(', ', $firewall)
+            . '). These commonly block file uploads and large form posts, answering with '
+            . 'their own "access denied" page before PHP runs. If staff see an access-denied '
+            . 'message when saving the officials page, ask the host for that module\'s log '
+            . 'around that time - it records what rule fired and why.';
+        verdict('!', 'A firewall module is loaded: ' . implode(', ', $firewall));
+    }
+} else {
+    $warnings[] = 'Could not list the web server modules from the command line, so this check '
+        . 'cannot say whether a firewall module is in front of PHP. If staff see an '
+        . 'access-denied message when saving, ask the host to check the error log and any '
+        . 'firewall log for that request.';
+}
+
+
+/*
+|--------------------------------------------------------------------------
 | 4. Database
 |--------------------------------------------------------------------------
 */
