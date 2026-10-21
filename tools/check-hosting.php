@@ -162,12 +162,37 @@ if (!is_file($mailFile)) {
         . 'only sees "We could not send your sign-in code".';
     verdict('X', 'config/mail.php is MISSING. This alone breaks the sign-in code.');
     $mail = null;
+} elseif (!is_readable($mailFile)) {
+
+    /*
+    | The file is there and this account cannot read it. That is CORRECT
+    | for a file holding an SMTP password - but it means this check cannot
+    | see the settings, so say which account to re-run as rather than
+    | crashing on the require, which is what this did before.
+    */
+    $warnings[] = 'config/mail.php exists but this account cannot read it, so the mail '
+        . 'settings could not be checked. That restriction is correct for a file holding '
+        . 'a password. To check them, run this as the web server user:'
+        . "\n\n       sudo -u www-data php tools/check-hosting.php\n\n"
+        . '     The rest of this report is unaffected.';
+
+    verdict('!', 'config/mail.php exists but is not readable by this account.');
+    verdict('..', 'Re-run as the web server user to check the mail settings.');
+
+    $mail = null;
+
 } else {
-    verdict('OK', 'config/mail.php exists.');
+    verdict('OK', 'config/mail.php exists and is readable.');
 
-    $mail = require $mailFile;
+    try {
+        $mail = require $mailFile;
+    } catch (Throwable $exception) {
+        $problems[] = 'config/mail.php could not be loaded: ' . $exception->getMessage();
+        verdict('X', 'config/mail.php could not be loaded.');
+        $mail = null;
+    }
 
-    if (!is_array($mail)) {
+    if ($mail !== null && !is_array($mail)) {
         $problems[] = 'config/mail.php does not return an array.';
         $mail = null;
     }
@@ -351,8 +376,17 @@ $databaseFile = $root . '/config/database.php';
 if (!is_file($databaseFile)) {
     $problems[] = 'config/database.php is missing on this server.';
     verdict('X', 'config/database.php is MISSING.');
+} elseif (!is_readable($databaseFile)) {
+
+    /* Same as the mail settings above: locked down, not broken. */
+    $warnings[] = 'config/database.php exists but this account cannot read it, so the '
+        . 'database checks were skipped. Run as the web server user to include them:'
+        . "\n\n       sudo -u www-data php tools/check-hosting.php";
+
+    verdict('!', 'config/database.php exists but is not readable by this account.');
+
 } else {
-    verdict('OK', 'config/database.php exists.');
+    verdict('OK', 'config/database.php exists and is readable.');
 
     try {
         require $databaseFile;
