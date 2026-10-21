@@ -24,11 +24,18 @@ declare(strict_types=1);
 | config/database.php and removes it; refuses if one already exists.
 */
 
+/*
+| On a deployed portal there is already a config/database.php pointing at
+| the real database. _sandbox.php copies the portal somewhere temporary
+| and re-runs this test there, so the installation is never written to.
+*/
+require __DIR__ . '/_sandbox.php';
+
 $root = dirname(__DIR__);
 $configPath = $root . '/config/database.php';
 
 if (is_file($configPath)) {
-    fwrite(STDERR, "config/database.php already exists - not overwriting it.\n");
+    fwrite(STDERR, "config/database.php is still present - refusing to overwrite it.\n");
     exit(2);
 }
 
