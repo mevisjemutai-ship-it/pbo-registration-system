@@ -1,0 +1,112 @@
+<?php
+
+declare(strict_types=1);
+
+/*
+|--------------------------------------------------------------------------
+| Block capitals
+|--------------------------------------------------------------------------
+|
+| The register is kept in block capitals, the way the paper forms are. Staff
+| type normally and the portal stores the capitals, so nobody has to hold
+| the shift key down for an afternoon and no record depends on which
+| officer entered it.
+|
+| ONE THING TO BE CLEAR ABOUT: this is not reversible. Once "Murang'a" is
+| stored as "MURANG'A" the original is gone, and names that carry meaning
+| in their capitals - McDonald, de Souza, van der Merwe - lose it. For a
+| register that is printed in capitals anyway that is an acceptable trade,
+| but it is a trade, and it is made at the moment of saving rather than at
+| the moment of printing.
+|
+| WHAT IS DELIBERATELY LEFT ALONE:
+|
+|   Email addresses. The part before the @ is case-sensitive by the
+|   standard, and while most mail servers ignore that, some do not. An
+|   address is something we send to, not something we display on a
+|   certificate, and breaking delivery to save appearances is a bad bargain.
+|   They are lower-cased instead, which IS safe and makes duplicates easier
+|   to spot.
+|
+|   Passwords, obviously, and anything holding a web address.
+|
+*/
+
+
+/**
+ * Fields that keep the case they were typed in.
+ *
+ * Matched on the field name, so it works the same whether the value
+ * arrived as `email`, `parent_email` or `officials[chairperson][email]`.
+ */
+function pboFieldKeepsCase(string $field): bool
+{
+    $field = strtolower($field);
+
+    foreach (['email', 'password', 'url', 'website', 'token', 'csrf'] as $needle) {
+        if (str_contains($field, $needle)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+
+/**
+ * One value, in block capitals.
+ *
+ * mb_strtoupper rather than strtoupper so that accented and non-ASCII
+ * letters are raised too; strtoupper only knows about plain ASCII and
+ * would leave half a name untouched.
+ */
+function pboBlockCaps(mixed $value): string
+{
+    return mb_strtoupper(trim((string) $value), 'UTF-8');
+}
+
+
+/**
+ * Apply the house rule to one field, by name.
+ *
+ * Emails are lower-cased: not for appearance, but because it makes two
+ * entries of the same address look the same.
+ */
+function pboStoredCase(string $field, mixed $value): string
+{
+    $value = trim((string) $value);
+
+    if ($value === '') {
+        return '';
+    }
+
+    if (!pboFieldKeepsCase($field)) {
+        return pboBlockCaps($value);
+    }
+
+    if (str_contains(strtolower($field), 'email')) {
+        return mb_strtolower($value, 'UTF-8');
+    }
+
+    return $value;
+}
+
+
+/**
+ * The same rule across an array of field => value.
+ *
+ * @param array<string, mixed> $values
+ * @return array<string, string>
+ */
+function pboStoredCaseAll(array $values): array
+{
+    $out = [];
+
+    foreach ($values as $field => $value) {
+        $out[$field] = is_scalar($value) || $value === null
+            ? pboStoredCase((string) $field, $value)
+            : $value;
+    }
+
+    return $out;
+}

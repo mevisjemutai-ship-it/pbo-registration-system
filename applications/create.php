@@ -6,6 +6,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/application-validation.php';
 require_once __DIR__ . '/../includes/kenya-locations.php';
+require_once __DIR__ . '/../includes/text-case.php';
 
 requireLogin();
 requirePasswordChanged();
@@ -466,9 +467,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     | Main form
     */
 
+    /*
+    | The register is kept in block capitals. Staff type normally and
+    | pboStoredCase() raises it - except for email addresses, which are
+    | lower-cased instead; see includes/text-case.php for why.
+    */
     foreach ($form as $field => $defaultValue) {
         if (array_key_exists($field, $_POST)) {
-            $form[$field] = trim((string) $_POST[$field]);
+            $form[$field] = pboStoredCase($field, $_POST[$field]);
         }
     }
 
@@ -524,11 +530,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $details = [];
             }
 
-            $operatingLocations[$countySlug] = ['county' => $countyName];
+            $operatingLocations[$countySlug] = [
+                'county' => pboBlockCaps($countyName),
+            ];
 
             foreach ($operatingLocationFieldNames as $fieldName) {
                 $operatingLocations[$countySlug][$fieldName] =
-                    trim((string) ($details[$fieldName] ?? ''));
+                    pboStoredCase($fieldName, $details[$fieldName] ?? '');
             }
         }
 
