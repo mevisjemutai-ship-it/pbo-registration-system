@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/official-rules.php';
 require_once __DIR__ . '/../includes/application-validation.php';
 
 requireLogin();
@@ -39,6 +40,12 @@ if (!$connection instanceof PDO) {
         'Database connection was not initialized as a PDO instance.'
     );
 }
+
+/*
+| The two tax-identification columns only exist once
+| database/add_official_tax_id.sql has been run.
+*/
+$hasTaxColumns = officialTaxColumnsExist($connection);
 
 
 /*
@@ -729,6 +736,7 @@ $statement =
             nationality,
             id_passport_number,
             kra_pin,
+            " . ($hasTaxColumns ? 'tax_id_type, tax_id_number,' : '') . "
             phone_number,
             email,
             signature
@@ -739,9 +747,9 @@ $statement =
             CASE designation
                 WHEN 'CHAIRPERSON'
                     THEN 1
-                WHEN 'TREASURER'
-                    THEN 2
                 WHEN 'SECRETARY'
+                    THEN 2
+                WHEN 'TREASURER'
                     THEN 3
                 WHEN 'DIRECTOR'
                     THEN 4
@@ -3249,6 +3257,42 @@ require_once __DIR__ .
                                         </span>
 
                                     </div>
+
+
+                                    <?php
+                                    /*
+                                     | A tax number from another country is
+                                     | shown under its own name, never under
+                                     | the heading "KRA PIN".
+                                     */
+                                    $foreignTax = trim(
+                                        (string) ($official['tax_id_number'] ?? '')
+                                    );
+
+                                    $foreignTaxType = trim(
+                                        (string) ($official['tax_id_type'] ?? '')
+                                    );
+                                    ?>
+
+                                    <?php if ($foreignTax !== ''): ?>
+
+                                        <div class="review-field">
+
+                                            <span class="review-field-label">
+                                                <?= e(
+                                                    $foreignTaxType !== ''
+                                                        ? 'Tax ID (' . $foreignTaxType . ')'
+                                                        : 'Tax ID'
+                                                ) ?>
+                                            </span>
+
+                                            <span class="review-field-value">
+                                                <?= e($foreignTax) ?>
+                                            </span>
+
+                                        </div>
+
+                                    <?php endif; ?>
 
 
                                     <div class="review-field">

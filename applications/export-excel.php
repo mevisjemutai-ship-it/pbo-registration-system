@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/official-rules.php';
 
 requireLogin();
 requirePasswordChanged();
@@ -344,8 +345,8 @@ $stmt = $pdo->prepare(
     ORDER BY
         CASE UPPER(TRIM(designation))
             WHEN 'CHAIRPERSON' THEN 1
-            WHEN 'TREASURER' THEN 2
-            WHEN 'SECRETARY' THEN 3
+            WHEN 'SECRETARY' THEN 2
+            WHEN 'TREASURER' THEN 3
             WHEN 'DIRECTOR' THEN 4
             ELSE 5
         END,

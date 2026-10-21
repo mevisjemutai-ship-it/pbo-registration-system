@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/official-rules.php';
 require_once __DIR__ . '/../includes/kenya-locations.php';
 
 requireLogin();
@@ -22,6 +23,14 @@ if (!$connection instanceof PDO) {
         'Database connection was not initialized as a PDO instance.'
     );
 }
+
+/*
+| The two tax-identification columns only exist once
+| database/add_official_tax_id.sql has been run. Until then this page
+| behaves exactly as it did before, rather than failing with
+| "Unknown column" in front of a member of staff.
+*/
+$hasTaxColumns = officialTaxColumnsExist($connection);
 
 /*
 |--------------------------------------------------------------------------
@@ -563,6 +572,7 @@ $stmt = $connection->prepare(
         nationality,
         id_passport_number,
         kra_pin,
+        " . ($hasTaxColumns ? 'tax_id_type, tax_id_number,' : '') . "
         phone_number,
         email,
         signature
@@ -571,8 +581,8 @@ $stmt = $connection->prepare(
      ORDER BY
         CASE designation
             WHEN 'CHAIRPERSON' THEN 1
-            WHEN 'TREASURER' THEN 2
-            WHEN 'SECRETARY' THEN 3
+            WHEN 'SECRETARY' THEN 2
+            WHEN 'TREASURER' THEN 3
             WHEN 'DIRECTOR' THEN 4
             ELSE 5
         END,
@@ -986,6 +996,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     )
                 ),
 
+            'tax_id_type' =>
+                cleanTaxIdType(
+                    $posted['tax_id_type'] ?? ''
+                ),
+
+            'tax_id_number' =>
+                trim(
+                    (string) (
+                        $posted['tax_id_number'] ?? ''
+                    )
+                ),
+
             'phone_number' =>
                 trim(
                     (string) (
@@ -1049,6 +1071,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 trim(
                     (string) (
                         $postedDirector['kra_pin'] ?? ''
+                    )
+                ),
+
+            'tax_id_type' =>
+                cleanTaxIdType(
+                    $postedDirector['tax_id_type'] ?? ''
+                ),
+
+            'tax_id_number' =>
+                trim(
+                    (string) (
+                        $postedDirector['tax_id_number'] ?? ''
                     )
                 ),
 
@@ -1390,10 +1424,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'Phone Number',
         ];
 
-        if ($designation === 'CHAIRPERSON') {
-            $officialFields['email'] = 'Email';
-        }
-
         foreach (
             $officialFields as $field => $fieldLabel
         ) {
@@ -1421,6 +1451,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errors[] =
                 $label .
                 ' — enter a valid email address.';
+        }
+
+        /*
+         | KRA PIN follows nationality - see includes/official-rules.php.
+         */
+        foreach (
+            officialTaxIdErrors($official, $label) as $taxError
+        ) {
+            $errors[] = $taxError;
         }
     }
 
@@ -1473,9 +1512,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 'phone_number' =>
                     'Phone Number',
-
-                'email' =>
-                    'Email',
             ] as $field => $label
         ) {
 
@@ -1504,6 +1540,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'Director ' .
                 ($index + 1) .
                 ' — enter a valid email address.';
+        }
+
+        /*
+         | KRA PIN follows nationality - see includes/official-rules.php.
+         */
+        foreach (
+            officialTaxIdErrors($director, 'Director ' . ($index + 1))
+            as $taxError
+        ) {
+            $errors[] = $taxError;
         }
 
         $completeDirectors[] =
@@ -2045,6 +2091,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     nationality,
                     id_passport_number,
                     kra_pin,
+                    ' . ($hasTaxColumns ? 'tax_id_type, tax_id_number,' : '') . '
                     phone_number,
                     email,
                     signature
@@ -2057,6 +2104,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     :nationality,
                     :id_passport_number,
                     :kra_pin,
+                    ' . ($hasTaxColumns ? ':tax_id_type, :tax_id_number,' : '') . '
                     :phone_number,
                     :email,
                     :signature
@@ -2077,7 +2125,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $official =
                     $officials[$designation];
 
-                $insertOfficial->execute([
+                $parameters = [
                     'application_id' =>
                         $applicationId,
 
@@ -2104,7 +2152,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     'signature' =>
                         $oldSignatures[$designation] ?? null,
-                ]);
+                ];
+
+                if ($hasTaxColumns) {
+
+                    $parameters['tax_id_type'] =
+                        ($official['tax_id_type'] ?? '') !== ''
+                            ? $official['tax_id_type']
+                            : null;
+
+                    $parameters['tax_id_number'] =
+                        ($official['tax_id_number'] ?? '') !== ''
+                            ? $official['tax_id_number']
+                            : null;
+                }
+
+                $insertOfficial->execute($parameters);
             }
 
             /*
@@ -2114,7 +2177,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $completeDirectors as $index => $director
             ) {
 
-                $insertOfficial->execute([
+                $parameters = [
                     'application_id' =>
                         $applicationId,
 
@@ -2141,7 +2204,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     'signature' =>
                         $oldSignatures['DIRECTOR'][$index] ?? null,
-                ]);
+                ];
+
+                if ($hasTaxColumns) {
+
+                    $parameters['tax_id_type'] =
+                        ($director['tax_id_type'] ?? '') !== ''
+                            ? $director['tax_id_type']
+                            : null;
+
+                    $parameters['tax_id_number'] =
+                        ($director['tax_id_number'] ?? '') !== ''
+                            ? $director['tax_id_number']
+                            : null;
+                }
+
+                $insertOfficial->execute($parameters);
             }
 
             /*
@@ -4139,9 +4217,11 @@ require_once __DIR__ . '/../includes/header.php';
                                 ['full_name', 'Name', true],
                                 ['nationality', 'Nationality', true],
                                 ['id_passport_number', 'ID / Passport Number', true],
-                                ['kra_pin', 'KRA PIN', false],
+                                ['kra_pin', 'KRA PIN', officialIsKenyan($official['nationality'] ?? '')],
+                                ['tax_id_type', 'Other Tax Identification Type', false],
+                                ['tax_id_number', 'Other Tax Identification Number', false],
                                 ['phone_number', 'Phone Number', true],
-                                ['email', 'Email', $designation === 'CHAIRPERSON'],
+                                ['email', 'Email', false],
                             ];
                             ?>
 
@@ -4754,6 +4834,8 @@ require_once __DIR__ . '/../includes/header.php';
                     ['nationality', 'Nationality'],
                     ['id_passport_number', 'ID / Passport Number'],
                     ['kra_pin', 'KRA PIN'],
+                    ['tax_id_type', 'Other Tax Identification Type'],
+                    ['tax_id_number', 'Other Tax Identification Number'],
                     ['phone_number', 'Phone Number'],
                     ['email', 'Email']
                 ];

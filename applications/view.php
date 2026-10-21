@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/official-rules.php';
 
 requireLogin();
 requirePasswordChanged();
@@ -23,6 +24,12 @@ if (isset($pdo) && $pdo instanceof PDO) {
 } else {
     throw new RuntimeException('Database connection is not available.');
 }
+
+/*
+| The two tax-identification columns only exist once
+| database/add_official_tax_id.sql has been run.
+*/
+$hasTaxColumns = officialTaxColumnsExist($db);
 
 
 /*
@@ -432,6 +439,7 @@ $stmt = $db->prepare(
         nationality,
         id_passport_number,
         kra_pin,
+        " . ($hasTaxColumns ? 'tax_id_type, tax_id_number,' : '') . "
         phone_number,
         email,
         signature
@@ -440,8 +448,8 @@ $stmt = $db->prepare(
     ORDER BY
         CASE designation
             WHEN 'CHAIRPERSON' THEN 1
-            WHEN 'TREASURER' THEN 2
-            WHEN 'SECRETARY' THEN 3
+            WHEN 'SECRETARY' THEN 2
+            WHEN 'TREASURER' THEN 3
             WHEN 'DIRECTOR' THEN 4
             ELSE 5
         END,
@@ -3625,6 +3633,37 @@ require_once __DIR__ . '/../includes/header.php';
                                         </strong>
 
                                     </div>
+
+
+                                    <?php
+                                    /*
+                                     | A tax number from another country is
+                                     | shown under its own name, never under
+                                     | the heading "KRA PIN".
+                                     */
+                                    $foreignTax =
+                                        trim((string) ($official['tax_id_number'] ?? ''));
+                                    ?>
+
+                                    <?php if ($foreignTax !== ''): ?>
+
+                                        <div class="detail-field">
+
+                                            <span>
+                                                <?= e(
+                                                    trim((string) ($official['tax_id_type'] ?? '')) !== ''
+                                                        ? 'Tax ID (' . $official['tax_id_type'] . ')'
+                                                        : 'Tax ID'
+                                                ) ?>
+                                            </span>
+
+                                            <strong>
+                                                <?= displayValue($foreignTax) ?>
+                                            </strong>
+
+                                        </div>
+
+                                    <?php endif; ?>
 
 
                                     <div class="detail-field">

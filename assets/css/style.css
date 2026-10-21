@@ -518,6 +518,12 @@ p {
 }
 
 
+/* The hidden attribute has to beat display:grid/flex, or a row marked
+   hidden by script stays on screen. */
+[hidden] {
+    display: none !important;
+}
+
 .form-row {
     display: grid;
 
