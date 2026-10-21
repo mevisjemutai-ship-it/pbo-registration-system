@@ -3,6 +3,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/application-validation.php';
+require_once __DIR__ . '/../includes/official-rules.php';
+require_once __DIR__ . '/../includes/kenya-locations.php';
 
 requireLogin();
 requirePasswordChanged();
@@ -21,6 +24,14 @@ if (!$connection instanceof PDO) {
         'Database connection was not initialized as a PDO instance.'
     );
 }
+
+/*
+| The two tax-identification columns only exist once
+| database/add_official_tax_id.sql has been run. Until then this page
+| behaves exactly as it did before, rather than failing with
+| "Unknown column" in front of a member of staff.
+*/
+$hasTaxColumns = officialTaxColumnsExist($connection);
 
 /*
 |--------------------------------------------------------------------------
@@ -562,6 +573,7 @@ $stmt = $connection->prepare(
         nationality,
         id_passport_number,
         kra_pin,
+        " . ($hasTaxColumns ? 'tax_id_type, tax_id_number,' : '') . "
         phone_number,
         email,
         signature
@@ -570,8 +582,8 @@ $stmt = $connection->prepare(
      ORDER BY
         CASE designation
             WHEN 'CHAIRPERSON' THEN 1
-            WHEN 'TREASURER' THEN 2
-            WHEN 'SECRETARY' THEN 3
+            WHEN 'SECRETARY' THEN 2
+            WHEN 'TREASURER' THEN 3
             WHEN 'DIRECTOR' THEN 4
             ELSE 5
         END,
@@ -943,8 +955,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     foreach (
         [
             'CHAIRPERSON',
-            'TREASURER',
             'SECRETARY',
+            'TREASURER',
         ] as $designation
     ) {
 
@@ -982,6 +994,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 trim(
                     (string) (
                         $posted['kra_pin'] ?? ''
+                    )
+                ),
+
+            'tax_id_type' =>
+                cleanTaxIdType(
+                    $posted['tax_id_type'] ?? ''
+                ),
+
+            'tax_id_number' =>
+                trim(
+                    (string) (
+                        $posted['tax_id_number'] ?? ''
                     )
                 ),
 
@@ -1051,6 +1075,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     )
                 ),
 
+            'tax_id_type' =>
+                cleanTaxIdType(
+                    $postedDirector['tax_id_type'] ?? ''
+                ),
+
+            'tax_id_number' =>
+                trim(
+                    (string) (
+                        $postedDirector['tax_id_number'] ?? ''
+                    )
+                ),
+
             'phone_number' =>
                 trim(
                     (string) (
@@ -1098,28 +1134,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     } else {
 
-        $date =
-            DateTimeImmutable::createFromFormat(
-                '!Y-m-d',
-                $form['registration_date']
-            );
+        /*
+         | One shared rule - see includes/application-validation.php. It
+         | rejects a day that does not exist AND a date in the future:
+         | records were found carrying 2027 and 2028.
+         */
+        $dateError = pboRegistrationDateError(
+            $form['registration_date'],
+            'Date of Registration'
+        );
 
-        $dateErrors =
-            DateTimeImmutable::getLastErrors();
-
-        if (
-            $date === false ||
-            (
-                is_array($dateErrors) &&
-                (
-                    $dateErrors['warning_count'] > 0 ||
-                    $dateErrors['error_count'] > 0
-                )
-            )
-        ) {
-
-            $errors[] =
-                'Enter a valid Date of Registration.';
+        if ($dateError !== null) {
+            $errors[] = $dateError;
         }
     }
 
@@ -1360,37 +1386,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
      |--------------------------------------------------------------------------
      */
 
+    /*
+     | Mirrors officials.php: KRA PIN is never required, and email is
+     | required for the Chairperson only.
+     */
     foreach (
         [
             'CHAIRPERSON' => 'Chairperson',
-            'TREASURER' => 'Treasurer',
             'SECRETARY' => 'Secretary',
+            'TREASURER' => 'Treasurer',
         ] as $designation => $label
     ) {
 
         $official =
             $officials[$designation];
 
+        $officialFields = [
+            'full_name' =>
+                'Name',
+
+            'nationality' =>
+                'Nationality',
+
+            'id_passport_number' =>
+                'ID / Passport Number',
+
+            'phone_number' =>
+                'Phone Number',
+        ];
+
         foreach (
-            [
-                'full_name' =>
-                    'Name',
-
-                'nationality' =>
-                    'Nationality',
-
-                'id_passport_number' =>
-                    'ID / Passport Number',
-
-                'kra_pin' =>
-                    'KRA PIN',
-
-                'phone_number' =>
-                    'Phone Number',
-
-                'email' =>
-                    'Email',
-            ] as $field => $fieldLabel
+            $officialFields as $field => $fieldLabel
         ) {
 
             if (
@@ -1416,6 +1442,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errors[] =
                 $label .
                 ' — enter a valid email address.';
+        }
+
+        /*
+         | KRA PIN follows nationality - see includes/official-rules.php.
+         */
+        foreach (
+            officialTaxIdErrors($official, $label) as $taxError
+        ) {
+            $errors[] = $taxError;
         }
     }
 
@@ -1452,7 +1487,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         /*
-         * Once started, all Director particulars are mandatory.
+         * Once started, a Director's particulars are mandatory - except the
+         * KRA PIN, which many officials genuinely do not have.
          */
         foreach (
             [
@@ -1465,14 +1501,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'id_passport_number' =>
                     'ID / Passport Number',
 
-                'kra_pin' =>
-                    'KRA PIN',
-
                 'phone_number' =>
                     'Phone Number',
-
-                'email' =>
-                    'Email',
             ] as $field => $label
         ) {
 
@@ -1501,6 +1531,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'Director ' .
                 ($index + 1) .
                 ' — enter a valid email address.';
+        }
+
+        /*
+         | KRA PIN follows nationality - see includes/official-rules.php.
+         */
+        foreach (
+            officialTaxIdErrors($director, 'Director ' . ($index + 1))
+            as $taxError
+        ) {
+            $errors[] = $taxError;
         }
 
         $completeDirectors[] =
@@ -2042,6 +2082,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     nationality,
                     id_passport_number,
                     kra_pin,
+                    ' . ($hasTaxColumns ? 'tax_id_type, tax_id_number,' : '') . '
                     phone_number,
                     email,
                     signature
@@ -2054,6 +2095,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     :nationality,
                     :id_passport_number,
                     :kra_pin,
+                    ' . ($hasTaxColumns ? ':tax_id_type, :tax_id_number,' : '') . '
                     :phone_number,
                     :email,
                     :signature
@@ -2066,15 +2108,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             foreach (
                 [
                     'CHAIRPERSON',
-                    'TREASURER',
                     'SECRETARY',
+                    'TREASURER',
                 ] as $designation
             ) {
 
                 $official =
                     $officials[$designation];
 
-                $insertOfficial->execute([
+                $parameters = [
                     'application_id' =>
                         $applicationId,
 
@@ -2101,7 +2143,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     'signature' =>
                         $oldSignatures[$designation] ?? null,
-                ]);
+                ];
+
+                if ($hasTaxColumns) {
+
+                    $parameters['tax_id_type'] =
+                        ($official['tax_id_type'] ?? '') !== ''
+                            ? $official['tax_id_type']
+                            : null;
+
+                    $parameters['tax_id_number'] =
+                        ($official['tax_id_number'] ?? '') !== ''
+                            ? $official['tax_id_number']
+                            : null;
+                }
+
+                $insertOfficial->execute($parameters);
             }
 
             /*
@@ -2111,7 +2168,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $completeDirectors as $index => $director
             ) {
 
-                $insertOfficial->execute([
+                $parameters = [
                     'application_id' =>
                         $applicationId,
 
@@ -2138,7 +2195,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     'signature' =>
                         $oldSignatures['DIRECTOR'][$index] ?? null,
-                ]);
+                ];
+
+                if ($hasTaxColumns) {
+
+                    $parameters['tax_id_type'] =
+                        ($director['tax_id_type'] ?? '') !== ''
+                            ? $director['tax_id_type']
+                            : null;
+
+                    $parameters['tax_id_number'] =
+                        ($director['tax_id_number'] ?? '') !== ''
+                            ? $director['tax_id_number']
+                            : null;
+                }
+
+                $insertOfficial->execute($parameters);
             }
 
             /*
@@ -3194,6 +3266,8 @@ require_once __DIR__ . '/../includes/header.php';
                             value="<?= e(
                                 $form['registration_date']
                             ) ?>"
+                            min="<?= e(PBO_EARLIEST_REGISTRATION_DATE) ?>"
+                            max="<?= e(pboTodayForInput()) ?>"
                             required
                         >
 
@@ -3317,8 +3391,14 @@ require_once __DIR__ . '/../includes/header.php';
 
                             </label>
 
+                            <!--
+                                The id is what location-suggest.js looks for
+                                when attaching the county / sub-county /
+                                postal-code suggestion lists.
+                            -->
                             <input
                                 class="form-control"
+                                id="<?= e($field) ?>"
                                 name="<?= e($field) ?>"
                                 value="<?= e(
                                     $form[$field]
@@ -4069,7 +4149,7 @@ require_once __DIR__ . '/../includes/header.php';
                     </h2>
 
                     <p>
-                        Chairperson, Treasurer and Secretary are required.
+                        Chairperson, Secretary and Treasurer are required.
                         Directors are optional; an entered Director must be
                         complete.
                     </p>
@@ -4083,8 +4163,8 @@ require_once __DIR__ . '/../includes/header.php';
                 <?php
                 $principalOfficials = [
                     'CHAIRPERSON' => 'Chairperson',
-                    'TREASURER' => 'Treasurer',
                     'SECRETARY' => 'Secretary',
+                    'TREASURER' => 'Treasurer',
                 ];
                 ?>
 
@@ -4121,25 +4201,37 @@ require_once __DIR__ . '/../includes/header.php';
                         <div class="row g-3">
 
                             <?php
+                            /*
+                            | Third element: whether the browser enforces it.
+                            | KRA PIN is never required; email is required for
+                            | the Chairperson only.
+                            */
                             $officialFields = [
-                                ['full_name', 'Name'],
-                                ['nationality', 'Nationality'],
-                                ['id_passport_number', 'ID / Passport Number'],
-                                ['kra_pin', 'KRA PIN'],
-                                ['phone_number', 'Phone Number'],
-                                ['email', 'Email'],
+                                ['full_name', 'Name', true],
+                                ['nationality', 'Nationality', true],
+                                ['id_passport_number', 'ID / Passport Number', true],
+                                ['kra_pin', 'KRA PIN', officialIsKenyan($official['nationality'] ?? '')],
+                                ['tax_id_type', 'Other Tax Identification Type', false],
+                                ['tax_id_number', 'Other Tax Identification Number', false],
+                                ['phone_number', 'Phone Number', true],
+                                ['email', 'Email', false],
                             ];
                             ?>
 
                             <?php foreach (
                                 $officialFields
-                                as [$field, $fieldLabel]
+                                as [$field, $fieldLabel, $fieldRequired]
                             ): ?>
 
                                 <div class="col-md-6">
 
                                     <label class="edit-label">
                                         <?= e($fieldLabel) ?>
+                                        <?php if (!$fieldRequired): ?>
+                                            <span class="text-muted fw-normal">
+                                                (optional)
+                                            </span>
+                                        <?php endif; ?>
                                     </label>
 
                                     <input
@@ -4150,7 +4242,7 @@ require_once __DIR__ . '/../includes/header.php';
                                                 $official[$field] ?? ''
                                             )
                                         ) ?>"
-                                        required
+                                        <?= $fieldRequired ? 'required' : '' ?>
                                     >
 
                                 </div>
@@ -4735,6 +4827,8 @@ require_once __DIR__ . '/../includes/header.php';
                     ['nationality', 'Nationality'],
                     ['id_passport_number', 'ID / Passport Number'],
                     ['kra_pin', 'KRA PIN'],
+                    ['tax_id_type', 'Other Tax Identification Type'],
+                    ['tax_id_number', 'Other Tax Identification Number'],
                     ['phone_number', 'Phone Number'],
                     ['email', 'Email']
                 ];
@@ -4864,6 +4958,28 @@ require_once __DIR__ . '/../includes/header.php';
 
 })();
 </script>
+
+
+<!-- ==========================================================
+     COUNTY / SUB-COUNTY / POSTAL CODE SUGGESTIONS
+
+     Same data and same script as the create wizard, so a record
+     edited here gets the same spellings it was captured with.
+     The fields stay free text; this only proposes values.
+     ========================================================== -->
+
+<script>
+window.KENYA_LOCATIONS = <?= json_encode(
+    [
+        'counties'    => kenyaCounties($connection),
+        'subCounties' => kenyaSubCountyMap($connection),
+        'postal'      => kenyaPostalCodes($connection),
+    ],
+    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP
+) ?>;
+</script>
+
+<script src="/pbo-portal/assets/js/location-suggest.js"></script>
 
 <?php
 require_once __DIR__ . '/../includes/footer.php';

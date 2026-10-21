@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/official-rules.php';
 
 requireLogin();
 requirePasswordChanged();
@@ -98,6 +99,8 @@ function emptyOfficial(string $designation): array
         'nationality' => '',
         'id_passport_number' => '',
         'kra_pin' => '',
+        'tax_id_type' => '',
+        'tax_id_number' => '',
         'phone_number' => '',
         'email' => '',
         'signature' => '',
@@ -110,8 +113,8 @@ function officialLabel(string $designation): string
 {
     return match (strtoupper($designation)) {
         'CHAIRPERSON' => 'Chairperson',
-        'TREASURER' => 'Treasurer',
         'SECRETARY' => 'Secretary',
+        'TREASURER' => 'Treasurer',
         'DIRECTOR' => 'Director',
         default => ucwords(
             strtolower(
@@ -130,6 +133,8 @@ function directorHasData(array $record): bool
             'nationality',
             'id_passport_number',
             'kra_pin',
+            'tax_id_type',
+            'tax_id_number',
             'phone_number',
             'email',
             'existing_signature',
@@ -338,6 +343,13 @@ $directors = [];
 |--------------------------------------------------------------------------
 */
 
+/*
+| The two tax-identification columns only exist once
+| database/add_official_tax_id.sql has been run. Until then the page works
+| exactly as before rather than failing with "Unknown column".
+*/
+$hasTaxColumns = officialTaxColumnsExist($connection);
+
 $statement =
     $connection->prepare(
         "
@@ -348,6 +360,7 @@ $statement =
             nationality,
             id_passport_number,
             kra_pin,
+            " . ($hasTaxColumns ? 'tax_id_type, tax_id_number,' : '') . "
             phone_number,
             email,
             signature
@@ -356,8 +369,8 @@ $statement =
         ORDER BY
             CASE designation
                 WHEN 'CHAIRPERSON' THEN 1
-                WHEN 'TREASURER' THEN 2
-                WHEN 'SECRETARY' THEN 3
+                WHEN 'SECRETARY' THEN 2
+                WHEN 'TREASURER' THEN 3
                 WHEN 'DIRECTOR' THEN 4
                 ELSE 5
             END,
@@ -392,6 +405,10 @@ foreach ($savedOfficials as $saved) {
             (string) ($saved['id_passport_number'] ?? ''),
         'kra_pin' =>
             (string) ($saved['kra_pin'] ?? ''),
+        'tax_id_type' =>
+            (string) ($saved['tax_id_type'] ?? ''),
+        'tax_id_number' =>
+            (string) ($saved['tax_id_number'] ?? ''),
         'phone_number' =>
             (string) ($saved['phone_number'] ?? ''),
         'email' =>
@@ -550,6 +567,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $posted['kra_pin'] ?? ''
                 ),
 
+            'tax_id_type' =>
+                cleanTaxIdType(
+                    $posted['tax_id_type'] ?? ''
+                ),
+
+            'tax_id_number' =>
+                cleanString(
+                    $posted['tax_id_number'] ?? ''
+                ),
+
             'phone_number' =>
                 cleanString(
                     $posted['phone_number'] ?? ''
@@ -625,6 +652,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $posted['kra_pin'] ?? ''
                 ),
 
+            'tax_id_type' =>
+                cleanTaxIdType(
+                    $posted['tax_id_type'] ?? ''
+                ),
+
+            'tax_id_number' =>
+                cleanString(
+                    $posted['tax_id_number'] ?? ''
+                ),
+
             'phone_number' =>
                 cleanString(
                     $posted['phone_number'] ?? ''
@@ -686,7 +723,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     | Full validation for Save & Continue
     |--------------------------------------------------------------------------
     |
-    | Only Chairperson, Treasurer and Secretary are mandatory.
+    | Only Chairperson, Secretary and Treasurer are mandatory.
+    |
+    | KRA PIN follows nationality: required for a Kenyan official, not
+    | required otherwise, because a KRA PIN is issued by the Kenya Revenue
+    | Authority and a non-Kenyan may simply not have one. A foreign tax
+    | number is recorded in its own fields rather than forced into the KRA
+    | PIN box. See includes/official-rules.php.
+    |
+    | Email is not required for anybody. Testing against real files found
+    | officials with no email address on record, and a required field only
+    | taught staff to invent one. An address that IS entered is still
+    | checked.
     |
     */
 
@@ -703,14 +751,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'id_passport_number'
                 => 'ID / Passport Number',
 
-            'kra_pin'
-                => 'KRA PIN',
-
             'phone_number'
                 => 'Phone Number',
-
-            'email'
-                => 'Email',
         ];
 
 
@@ -723,8 +765,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         foreach (
             [
                 $chairperson,
-                $treasurer,
                 $secretary,
+                $treasurer,
             ]
             as $record
         ) {
@@ -751,6 +793,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $fieldLabel .
                         ' is required.';
                 }
+            }
+
+            foreach (
+                officialTaxIdErrors($record, $label)
+                as $taxError
+            ) {
+                $errors[] = $taxError;
             }
 
             if (
@@ -805,6 +854,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $fieldLabel .
                         ' is required.';
                 }
+            }
+
+            foreach (
+                officialTaxIdErrors($director, $label)
+                as $taxError
+            ) {
+                $errors[] = $taxError;
             }
 
             if (
@@ -1445,6 +1501,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             |--------------------------------------------------------------------------
             */
 
+            /*
+            | The tax-identification columns are only written when the
+            | migration has been run - see officialTaxColumnsExist().
+            */
             $insert =
                 $connection->prepare(
                     "
@@ -1456,6 +1516,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         nationality,
                         id_passport_number,
                         kra_pin,
+                        " . ($hasTaxColumns ? 'tax_id_type, tax_id_number,' : '') . "
                         phone_number,
                         email,
                         signature
@@ -1468,6 +1529,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         :nationality,
                         :id_passport_number,
                         :kra_pin,
+                        " . ($hasTaxColumns ? ':tax_id_type, :tax_id_number,' : '') . "
                         :phone_number,
                         :email,
                         :signature
@@ -1493,6 +1555,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $record['nationality'] !== '' ||
                     $record['id_passport_number'] !== '' ||
                     $record['kra_pin'] !== '' ||
+                    ($record['tax_id_number'] ?? '') !== '' ||
                     $record['phone_number'] !== '' ||
                     $record['email'] !== '' ||
                     $record['signature'] !== '';
@@ -1507,7 +1570,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
 
-                $insert->execute([
+                $parameters = [
 
                     ':application_id'
                         => $applicationId,
@@ -1555,7 +1618,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 'signature'
                             ]
                             : null,
-                ]);
+                ];
+
+                if ($hasTaxColumns) {
+
+                    $parameters[':tax_id_type'] =
+                        ($record['tax_id_type'] ?? '') !== ''
+                            ? $record['tax_id_type']
+                            : null;
+
+                    $parameters[':tax_id_number'] =
+                        ($record['tax_id_number'] ?? '') !== ''
+                            ? $record['tax_id_number']
+                            : null;
+                }
+
+                $insert->execute($parameters);
             }
 
 
@@ -1972,6 +2050,14 @@ require_once __DIR__ .
         class="application-form"
         id="officials-form"
         autocomplete="off"
+        <?php
+        /*
+        | Autosave key: this page, this application. Keeping the key
+        | specific means one application's draft can never be offered
+        | back on another's page.
+        */
+        ?>
+        data-autosave="officials-<?= (int) ($applicationId ?? 0) ?>"
     >
 
         <input
@@ -2020,7 +2106,7 @@ require_once __DIR__ .
                     </h2>
 
                     <p>
-                        Chairperson, Treasurer and Secretary are required.
+                        Chairperson, Secretary and Treasurer are required.
                     </p>
 
                 </div>
@@ -2032,8 +2118,8 @@ require_once __DIR__ .
 
                 Complete the required particulars for the
                 <strong>Chairperson</strong>,
-                <strong>Treasurer</strong> and
-                <strong>Secretary</strong>.
+                <strong>Secretary</strong> and
+                <strong>Treasurer</strong>.
 
                 Signatures are
                 <strong>optional</strong> and may be uploaded
@@ -2054,16 +2140,16 @@ require_once __DIR__ .
                 'record' => $chairperson,
             ],
 
-            'treasurer' => [
-                'number' => '2',
-                'title' => 'Treasurer',
-                'record' => $treasurer,
-            ],
-
             'secretary' => [
-                'number' => '3',
+                'number' => '2',
                 'title' => 'Secretary',
                 'record' => $secretary,
+            ],
+
+            'treasurer' => [
+                'number' => '3',
+                'title' => 'Treasurer',
+                'record' => $treasurer,
             ],
         ];
 
@@ -2206,7 +2292,10 @@ require_once __DIR__ .
 
                         <label>
                             KRA PIN
-                            <span class="required">*</span>
+                            <span
+                                class="required kra-required"
+                                data-kra-required
+                            >*</span>
                         </label>
 
                         <input
@@ -2221,8 +2310,17 @@ require_once __DIR__ .
                                     'kra_pin'
                                 ]
                             ) ?>"
-                            required
+                            data-kra-pin
                         >
+
+                        <span
+                            class="form-help kra-help"
+                            data-kra-help
+                            hidden
+                        >
+                            Not required for a non-Kenyan official.
+                            Record any tax number from their own country below.
+                        </span>
 
                     </div>
 
@@ -2251,13 +2349,75 @@ require_once __DIR__ .
                 </div>
 
 
+                <!-- ==================================================
+                     TAX NUMBER FROM ANOTHER COUNTRY
+
+                     Shown only for a non-Kenyan official. A foreign tax
+                     number goes here, named for what it is, instead of
+                     being typed into the KRA PIN box - so no report ever
+                     prints a foreign number under the heading "KRA PIN".
+                     ================================================== -->
+
+                <div
+                    class="form-row foreign-tax-row"
+                    data-foreign-tax
+                    hidden
+                >
+
+                    <div class="form-group">
+
+                        <label>
+                            Other Tax Identification Type
+                        </label>
+
+                        <input
+                            type="text"
+                            name="officials[<?= e($formKey) ?>][tax_id_type]"
+                            list="tax-id-type-list"
+                            autocomplete="off"
+                            maxlength="100"
+                            value="<?= e(
+                                $record[
+                                    'tax_id_type'
+                                ] ?? ''
+                            ) ?>"
+                            placeholder="e.g. TIN, SSN, NIF"
+                        >
+
+                    </div>
+
+
+                    <div class="form-group">
+
+                        <label>
+                            Other Tax Identification Number
+                        </label>
+
+                        <input
+                            type="text"
+                            name="officials[<?= e($formKey) ?>][tax_id_number]"
+                            autocomplete="off"
+                            autocapitalize="characters"
+                            spellcheck="false"
+                            maxlength="100"
+                            value="<?= e(
+                                $record[
+                                    'tax_id_number'
+                                ] ?? ''
+                            ) ?>"
+                        >
+
+                    </div>
+
+                </div>
+
+
                 <div class="form-row">
 
                     <div class="form-group">
 
                         <label>
                             Email
-                            <span class="required">*</span>
                         </label>
 
                         <input
@@ -2269,7 +2429,6 @@ require_once __DIR__ .
                                     'email'
                                 ]
                             ) ?>"
-                            required
                         >
 
                     </div>
@@ -2660,6 +2819,10 @@ require_once __DIR__ .
 
                                         <label>
                                             KRA PIN
+                                            <span
+                                                class="required"
+                                                data-kra-required
+                                            >*</span>
                                         </label>
 
                                         <input
@@ -2681,6 +2844,15 @@ require_once __DIR__ .
                         spellcheck="false"
                                         >
 
+                                        <span
+                                            class="form-help"
+                                            data-kra-help
+                                            hidden
+                                        >
+                                            Not required for a non-Kenyan
+                                            director.
+                                        </span>
+
                                     </div>
 
 
@@ -2701,6 +2873,66 @@ require_once __DIR__ .
                                             ) ?>"
                                             data-director-field
                                             data-field-name="phone_number"
+                                        >
+
+                                    </div>
+
+                                </div>
+
+
+                                <!-- Tax number from another country -->
+
+                                <div
+                                    class="form-row"
+                                    data-foreign-tax
+                                    hidden
+                                >
+
+                                    <div class="form-group">
+
+                                        <label>
+                                            Other Tax Identification Type
+                                        </label>
+
+                                        <input
+                                            type="text"
+                                            name="directors[<?= $index ?>][tax_id_type]"
+                                            list="tax-id-type-list"
+                                            autocomplete="off"
+                                            maxlength="100"
+                                            value="<?= e(
+                                                $director[
+                                                    'tax_id_type'
+                                                ] ?? ''
+                                            ) ?>"
+                                            placeholder="e.g. TIN, SSN, NIF"
+                                            data-director-field
+                                            data-field-name="tax_id_type"
+                                        >
+
+                                    </div>
+
+
+                                    <div class="form-group">
+
+                                        <label>
+                                            Other Tax Identification Number
+                                        </label>
+
+                                        <input
+                                            type="text"
+                                            name="directors[<?= $index ?>][tax_id_number]"
+                                            autocomplete="off"
+                                            autocapitalize="characters"
+                                            spellcheck="false"
+                                            maxlength="100"
+                                            value="<?= e(
+                                                $director[
+                                                    'tax_id_number'
+                                                ] ?? ''
+                                            ) ?>"
+                                            data-director-field
+                                            data-field-name="tax_id_number"
                                         >
 
                                     </div>
@@ -3012,6 +3244,7 @@ require_once __DIR__ .
 
                     <label>
                         KRA PIN
+                        <span class="required" data-kra-required>*</span>
                     </label>
 
                     <input
@@ -3023,6 +3256,10 @@ require_once __DIR__ .
                         spellcheck="false"
                         maxlength="50"
                     >
+
+                    <span class="form-help" data-kra-help hidden>
+                        Not required for a non-Kenyan director.
+                    </span>
 
                 </div>
 
@@ -3038,6 +3275,50 @@ require_once __DIR__ .
                         data-director-field
                         data-field-name="phone_number"
                         maxlength="50"
+                    >
+
+                </div>
+
+            </div>
+
+
+            <!-- Tax number from another country -->
+
+            <div class="form-row" data-foreign-tax hidden>
+
+                <div class="form-group">
+
+                    <label>
+                        Other Tax Identification Type
+                    </label>
+
+                    <input
+                        type="text"
+                        data-director-field
+                        data-field-name="tax_id_type"
+                        list="tax-id-type-list"
+                        autocomplete="off"
+                        maxlength="100"
+                        placeholder="e.g. TIN, SSN, NIF"
+                    >
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label>
+                        Other Tax Identification Number
+                    </label>
+
+                    <input
+                        type="text"
+                        data-director-field
+                        data-field-name="tax_id_number"
+                        autocomplete="off"
+                        autocapitalize="characters"
+                        spellcheck="false"
+                        maxlength="100"
                     >
 
                 </div>
@@ -3834,11 +4115,117 @@ require_once __DIR__ .
 
     /*
     |--------------------------------------------------------------------------
+    | KRA PIN follows nationality
+    |--------------------------------------------------------------------------
+    |
+    | A KRA PIN comes from the Kenya Revenue Authority, so only a Kenyan
+    | official reliably has one. Type a non-Kenyan nationality and the
+    | asterisk comes off the KRA PIN and the foreign tax fields appear.
+    |
+    | This is convenience only. The same rule is enforced on the server in
+    | includes/official-rules.php, which is what actually decides.
+    |
+    */
+
+    function looksKenyan(value) {
+        const text = String(value || '').trim().toLowerCase();
+
+        if (text === '') {
+            return false;
+        }
+
+        /* Mirrors officialIsKenyan() in includes/official-rules.php. */
+        return /\bkenya(n)?\b/.test(text);
+    }
+
+    /* The card holding this field: an official section or a director card. */
+    function cardOf(field) {
+        return field.closest('[data-director-card]')
+            || field.closest('.application-section')
+            || form;
+    }
+
+    function applyNationality(nationalityField) {
+        const card = cardOf(nationalityField);
+
+        if (!card) {
+            return;
+        }
+
+        const kenyan = looksKenyan(nationalityField.value);
+
+        const star = card.querySelector('[data-kra-required]');
+        const optional = card.querySelector('[data-kra-optional]');
+        const help = card.querySelector('[data-kra-help]');
+        const foreign = card.querySelector('[data-foreign-tax]');
+
+        if (star) {
+            star.hidden = !kenyan;
+        }
+
+        if (optional) {
+            optional.hidden = kenyan;
+        }
+
+        if (help) {
+            help.hidden = kenyan;
+        }
+
+        /*
+        | Keep the foreign fields on screen when they already hold something,
+        | even for a Kenyan nationality - hiding a filled field hides data
+        | the staff member cannot then see or correct.
+        */
+        if (foreign) {
+            const filled = Array.prototype.some.call(
+                foreign.querySelectorAll('input'),
+                function (input) {
+                    return String(input.value || '').trim() !== '';
+                }
+            );
+
+            foreign.hidden = kenyan && !filled;
+        }
+    }
+
+    function applyAllNationalities() {
+        Array.prototype.forEach.call(
+            form.querySelectorAll('input'),
+            function (field) {
+                if (/\[nationality\]$/.test(field.name || '')) {
+                    applyNationality(field);
+                }
+            }
+        );
+    }
+
+    form.addEventListener('input', function (event) {
+        const field = event.target;
+
+        if (
+            field instanceof HTMLInputElement &&
+            /\[nationality\]$/.test(field.name || '')
+        ) {
+            applyNationality(field);
+        }
+    });
+
+    /* Director cards are cloned after load, so re-apply when one appears. */
+    if (typeof MutationObserver === 'function') {
+        new MutationObserver(applyAllNationalities)
+            .observe(form, { childList: true, subtree: true });
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
     | Initial state
     |--------------------------------------------------------------------------
     */
 
     reindexDirectors();
+
+    applyAllNationalities();
 
 
     const initialDirectorCount =
@@ -3854,6 +4241,33 @@ require_once __DIR__ .
 })();
 </script>
 
+
+<!-- ==========================================================
+     Common names for a tax number outside Kenya. Suggestions
+     only - the field stays free text, because this list will
+     never cover every country.
+     ========================================================== -->
+
+<datalist id="tax-id-type-list">
+    <option value="TIN" label="Taxpayer Identification Number"></option>
+    <option value="SSN" label="Social Security Number (United States)"></option>
+    <option value="EIN" label="Employer Identification Number (United States)"></option>
+    <option value="NINO" label="National Insurance Number (United Kingdom)"></option>
+    <option value="UTR" label="Unique Taxpayer Reference (United Kingdom)"></option>
+    <option value="NIF" label="Numero de Identificacion Fiscal"></option>
+    <option value="SIN" label="Social Insurance Number (Canada)"></option>
+    <option value="TFN" label="Tax File Number (Australia)"></option>
+    <option value="PAN" label="Permanent Account Number (India)"></option>
+    <option value="TIN (Uganda)"></option>
+    <option value="TIN (Tanzania)"></option>
+    <option value="TIN (Rwanda)"></option>
+    <option value="Passport Number"></option>
+</datalist>
+
+
+
+<!-- Keeps typed input in the browser so a refused save never costs the work. -->
+<script src="/pbo-portal/assets/js/form-autosave.js" defer></script>
 
 <?php
 

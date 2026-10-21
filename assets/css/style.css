@@ -180,6 +180,71 @@ p {
     color: var(--red);
 }
 
+/* The counterpart to .required - says plainly that a blank is acceptable,
+   so staff stop inventing values to get past a field. */
+.optional-note {
+    color: var(--text-muted);
+    font-weight: 400;
+    font-size: 0.85em;
+}
+
+
+/* ------------------------------------------------------------
+   Show / hide password
+   The wrapper and button are built by assets/js/password-reveal.js.
+   ------------------------------------------------------------ */
+
+.password-field {
+    position: relative;
+    display: block;
+    width: 100%;
+}
+
+/* Room for the button so long passwords do not run underneath it. */
+.password-field input {
+    width: 100%;
+    padding-right: 2.75rem;
+}
+
+.password-reveal {
+    position: absolute;
+    top: 50%;
+    right: 0.5rem;
+    transform: translateY(-50%);
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    line-height: 0;
+}
+
+.password-reveal svg {
+    width: 1.15rem;
+    height: 1.15rem;
+    fill: currentColor;
+}
+
+.password-reveal:hover,
+.password-reveal:focus-visible {
+    color: var(--text);
+    background: rgba(0, 0, 0, 0.05);
+}
+
+.password-reveal:focus-visible {
+    outline: 2px solid var(--blue, #2f4168);
+    outline-offset: 1px;
+}
+
 
 /* ============================================================
    3. LOGIN / AUTHENTICATION
@@ -452,6 +517,181 @@ p {
     font-size: 12px;
 }
 
+
+/* The hidden attribute has to beat display:grid/flex, or a row marked
+   hidden by script stays on screen. */
+[hidden] {
+    display: none !important;
+}
+
+
+/* ------------------------------------------------------------
+   Autosave offer (assets/js/form-autosave.js)
+   Appears above the form when the browser is holding work the
+   page does not show.
+   ------------------------------------------------------------ */
+
+.autosave-offer {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+
+    margin-bottom: 18px;
+    padding: 14px 16px;
+
+    background: var(--gold-light);
+    border: 1px solid #e3cf9a;
+    border-left: 4px solid var(--gold);
+    border-radius: 6px;
+
+    color: var(--text);
+    font-size: 13px;
+}
+
+.autosave-offer span {
+    flex: 1 1 260px;
+}
+
+.autosave-offer .btn {
+    padding: 7px 14px;
+    font-size: 12px;
+}
+
+
+/* ------------------------------------------------------------
+   List of PBOs: alphabet, ordering, selection and export
+   ------------------------------------------------------------ */
+
+.registry-alphabet,
+.registry-ordering {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+.registry-ordering {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 0;
+}
+
+.registry-alphabet-label {
+    margin-right: 8px;
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+}
+
+.registry-letter {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    min-width: 26px;
+    padding: 5px 8px;
+
+    border: 1px solid var(--border);
+    border-radius: 4px;
+
+    background: var(--white);
+    color: var(--text-secondary);
+
+    font-size: 11px;
+    font-weight: 700;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.registry-letter:hover {
+    border-color: var(--blue-medium);
+    color: var(--blue);
+}
+
+.registry-letter.is-active {
+    background: var(--blue);
+    border-color: var(--blue);
+    color: var(--white);
+}
+
+.registry-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+
+    margin-bottom: 14px;
+    padding: 12px 14px;
+
+    background: var(--soft-blue-grey);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+/* The scope line is the whole point of the toolbar: it says what the
+   buttons will act on BEFORE they are pressed. */
+.registry-actions-scope {
+    flex: 1 1 260px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.registry-actions-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.registry-action {
+    padding: 7px 12px;
+
+    border: 1px solid #c9d8e6;
+    border-radius: 5px;
+
+    background: var(--white);
+    color: var(--blue);
+
+    font: inherit;
+    font-size: 11px;
+    font-weight: 700;
+
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.registry-action:hover {
+    background: var(--blue-light);
+    color: var(--blue-dark);
+}
+
+.registry-action-quiet {
+    border-color: var(--border);
+    color: var(--text-muted);
+}
+
+.registry-tick-cell {
+    width: 34px;
+    text-align: center;
+    cursor: pointer;
+
+    /* Dragging down the column ticks a run of rows; without this the
+       sweep highlights the page text instead. */
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.registry-tick-cell input {
+    accent-color: var(--blue);
+    cursor: pointer;
+    margin: 0;
+}
 
 .form-row {
     display: grid;
@@ -2301,6 +2541,30 @@ p {
 
 .user-action:hover {
     transform: translateY(-1px);
+}
+
+
+/* Edit name / username */
+
+.edit-action {
+    background: var(--white);
+
+    border-color: #d8d2bd;
+
+    color: var(--gold-dark);
+
+    text-decoration: none;
+}
+
+
+.edit-action:hover {
+    background: var(--gold-light);
+
+    color: var(--gold-dark);
+
+    box-shadow:
+        0 2px 5px
+        rgba(201, 154, 46, .14);
 }
 
 

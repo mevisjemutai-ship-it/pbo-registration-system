@@ -7,9 +7,11 @@ declare(strict_types=1);
 |--------------------------------------------------------------------------
 */
 
-if (session_status() !== PHP_SESSION_ACTIVE) {
-    session_start();
-}
+/*
+ * Configured in one place - see includes/session.php for why plain
+ * session_start() was signing people out on the hosted server.
+ */
+require_once __DIR__ . '/session.php';
 
 
 /*

@@ -24,6 +24,77 @@ declare(strict_types=1);
 */
 
 
+/*
+|--------------------------------------------------------------------------
+| Registration date
+|--------------------------------------------------------------------------
+|
+| An organization cannot have been registered on a date that has not
+| happened yet. Testing found records carrying 2027 and 2028, and December
+| 2026 - typed into a date box that accepted anything.
+|
+| Shared by create.php, edit.php and edit-submitted.php so all three agree,
+| and mirrored by the max= attribute on the input for an immediate warning.
+|
+*/
+
+/** The earliest registration date the form will accept. */
+const PBO_EARLIEST_REGISTRATION_DATE = '1900-01-01';
+
+
+/**
+ * What is wrong with a registration date, or null when it is fine.
+ *
+ * Accepts a blank: whether the date is REQUIRED is a separate question,
+ * answered by the page, so a blank gets one message rather than two.
+ */
+function pboRegistrationDateError(
+    ?string $value,
+    string $label = 'Registration Date'
+): ?string {
+    $value = trim((string) $value);
+
+    if ($value === '') {
+        return null;
+    }
+
+    $date = DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+
+    /*
+    | createFromFormat is forgiving - it reads "2026-13-45" as a date in
+    | 2027. Comparing the formatted result back against the input is what
+    | actually rejects a day that does not exist.
+    */
+    if ($date === false || $date->format('Y-m-d') !== $value) {
+        return $label . ' is not a valid date.';
+    }
+
+    $today = new DateTimeImmutable('today');
+
+    if ($date > $today) {
+        return $label . ' cannot be in the future. '
+            . 'Enter the date the organization was actually registered, '
+            . 'on or before ' . $today->format('j M Y') . '.';
+    }
+
+    if ($date < new DateTimeImmutable(PBO_EARLIEST_REGISTRATION_DATE)) {
+        return $label . ' looks wrong - it is before 1900. '
+            . 'Check the year.';
+    }
+
+    return null;
+}
+
+
+/**
+ * Today, as the date input's max= attribute wants it.
+ */
+function pboTodayForInput(): string
+{
+    return (new DateTimeImmutable('today'))->format('Y-m-d');
+}
+
+
 /**
  * Returns a list of problems in the Organization page that must be fixed
  * before the application can be submitted. An empty array means the

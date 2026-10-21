@@ -296,6 +296,8 @@ function pboAuditSnapshot(PDO $db, int $applicationId): array
         'nationality'        => 'nationality',
         'id_passport_number' => 'ID / passport',
         'kra_pin'            => 'KRA PIN',
+        'tax_id_type'        => 'Other Tax Identification Type',
+        'tax_id_number'      => 'Other Tax Identification Number',
         'phone_number'       => 'phone',
         'email'              => 'email',
         'signature'          => 'signature',

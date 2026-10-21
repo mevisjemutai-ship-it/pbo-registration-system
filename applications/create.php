@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/application-validation.php';
+require_once __DIR__ . '/../includes/kenya-locations.php';
 
 requireLogin();
 requirePasswordChanged();
@@ -99,55 +100,15 @@ function nullIfEmpty(string $value): ?string
 |--------------------------------------------------------------------------
 */
 
-$countyOptions = [
-    'Mombasa',
-    'Kwale',
-    'Kilifi',
-    'Tana River',
-    'Lamu',
-    'Taita-Taveta',
-    'Garissa',
-    'Wajir',
-    'Mandera',
-    'Marsabit',
-    'Isiolo',
-    'Meru',
-    'Tharaka-Nithi',
-    'Embu',
-    'Kitui',
-    'Machakos',
-    'Makueni',
-    'Nyandarua',
-    'Nyeri',
-    'Kirinyaga',
-    "Murang'a",
-    'Kiambu',
-    'Turkana',
-    'West Pokot',
-    'Samburu',
-    'Trans Nzoia',
-    'Uasin Gishu',
-    'Elgeyo-Marakwet',
-    'Nandi',
-    'Baringo',
-    'Laikipia',
-    'Nakuru',
-    'Narok',
-    'Kajiado',
-    'Kericho',
-    'Bomet',
-    'Kakamega',
-    'Vihiga',
-    'Bungoma',
-    'Busia',
-    'Siaya',
-    'Kisumu',
-    'Homa Bay',
-    'Migori',
-    'Kisii',
-    'Nyamira',
-    'Nairobi City County',
-];
+$countyOptions = kenyaCounties($connection);
+
+/*
+| The 47 names now come from includes/kenya-locations.php, which reads
+| the kenya_counties table and falls back to the original hardcoded
+| list if the lookup migration has not been run yet. edit.php, view.php,
+| drafts.php and export-excel.php can use the same helper instead of
+| each keeping a copy.
+*/
 
 $countyMap = [];
 
@@ -205,6 +166,18 @@ $operatingLocations = [];
 $operatesOtherLocations = 'no';
 
 $errors = [];
+
+/*
+| Things worth telling the staff member about that are NOT reasons to
+| refuse the save. Carried across the redirect in the session, because a
+| save ends in a redirect and anything held in a variable is gone by then.
+*/
+$warnings = [];
+
+if (!empty($_SESSION['application_warnings'])) {
+    $warnings = (array) $_SESSION['application_warnings'];
+    unset($_SESSION['application_warnings']);
+}
 
 /*
 | Things still missing before the application can be SUBMITTED.
@@ -587,11 +560,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($form['registration_date'] === '') {
         $errors[] = 'Registration Date is required.';
+    } else {
+        $dateError = pboRegistrationDateError($form['registration_date']);
+
+        if ($dateError !== null) {
+            $errors[] = $dateError;
+        }
     }
 
     if (!in_array($form['registration_type'], ['national', 'international'], true)) {
         $errors[] = 'Please select the Type of Organization.';
     }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Format problems that must not cost somebody their work
+    |--------------------------------------------------------------------------
+    |
+    | These used to go into $errors, and the save below runs only when
+    | $errors is empty - so one mistyped email in one county card threw away
+    | everything else on the page, including the parts that were correct.
+    | Staff reported moving to the next step and finding the rest of their
+    | work gone, which is exactly this.
+    |
+    | A badly formatted email is not a reason to discard an address. These
+    | are collected separately: the page still complains about them, and
+    | still refuses to SUBMIT the application (see
+    | pboOrganizationSectionErrors), but the draft is saved either way.
+    |
+    */
+
+    $warnings = [];
 
     $emailFields = [
         'email' => 'Head Office Email of the Organization',
@@ -604,7 +603,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $form[$field] !== ''
             && filter_var($form[$field], FILTER_VALIDATE_EMAIL) === false
         ) {
-            $errors[] = $label . ' must be a valid email address.';
+            $warnings[] = $label . ' does not look like an email address. '
+                . 'It has been saved as typed - correct it before submitting.';
         }
     }
 
@@ -613,8 +613,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $location['email'] !== ''
             && filter_var($location['email'], FILTER_VALIDATE_EMAIL) === false
         ) {
-            $errors[] = $location['county']
-                . ': please enter a valid organization email address, or leave it blank.';
+            $warnings[] = $location['county']
+                . ': the organization email does not look like an email address. '
+                . 'It has been saved as typed - correct it before submitting.';
         }
     }
 
@@ -959,6 +960,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $connection->commit();
 
             /*
+            | The save succeeded; anything in $warnings is a format problem
+            | that still needs correcting before submission. Hand it to the
+            | next page rather than losing it in the redirect.
+            */
+            if ($warnings !== []) {
+                $_SESSION['application_warnings'] = $warnings;
+            }
+
+            /*
             | Redirect: wizard link -> chosen page, Save & Continue -> Objectives
             */
 
@@ -1294,6 +1304,36 @@ require_once __DIR__ . '/../includes/header.php';
     <?php endif; ?>
 
 
+    <?php if (count($warnings) > 0): ?>
+
+        <!--
+            Saved, but something here is still wrong. Separate from the
+            error box on purpose: the work was NOT thrown away, and the
+            message has to say so, or staff retype what is already stored.
+        -->
+        <div class="alert alert-warning" role="status">
+
+            <strong>
+                Saved &mdash; but please correct the following before submitting:
+            </strong>
+
+            <ul>
+
+                <?php foreach ($warnings as $warning): ?>
+
+                    <li>
+                        <?= e($warning) ?>
+                    </li>
+
+                <?php endforeach; ?>
+
+            </ul>
+
+        </div>
+
+    <?php endif; ?>
+
+
     <?php if (count($errors) === 0 && count($submissionGaps) > 0): ?>
 
         <div class="alert alert-info" role="status">
@@ -1327,6 +1367,14 @@ require_once __DIR__ . '/../includes/header.php';
         method="post"
         id="application-form"
         novalidate
+        <?php
+        /*
+        | Autosave key: this page, this application. Keeping the key
+        | specific means one application's draft can never be offered
+        | back on another's page.
+        */
+        ?>
+        data-autosave="organization-<?= (int) ($applicationId ?? 0) ?>"
     >
 
         <input
@@ -1442,13 +1490,25 @@ require_once __DIR__ . '/../includes/header.php';
 
                     </label>
 
+                    <!--
+                        max stops the date picker offering a day that has
+                        not happened yet. The server checks it as well -
+                        a browser attribute is a courtesy, not a rule.
+                    -->
                     <input
                         type="date"
                         id="registration_date"
                         name="registration_date"
                         value="<?= old($form, 'registration_date') ?>"
+                        min="<?= e(PBO_EARLIEST_REGISTRATION_DATE) ?>"
+                        max="<?= e(pboTodayForInput()) ?>"
                         required
                     >
+
+                    <span class="form-help">
+                        The date the organization was registered.
+                        It cannot be in the future.
+                    </span>
 
                 </div>
 
@@ -3154,5 +3214,34 @@ require_once __DIR__ . '/../includes/header.php';
 
 </script>
 
+
+<!-- ==========================================================
+     Location suggestions (County / Sub-County / Postal Code)
+
+     Reference data is handed to the browser in one go rather than
+     looked up per keystroke: the whole sub-county map is a few KB,
+     and it keeps the dynamically-added operating-location rows
+     working without any extra requests.
+
+     The fields stay free text. This only adds suggestions.
+     ========================================================== -->
+
+<script>
+window.KENYA_LOCATIONS = <?= json_encode(
+    [
+        'counties'    => $countyOptions,
+        'subCounties' => kenyaSubCountyMap($connection),
+        'postal'      => kenyaPostalCodes($connection),
+    ],
+    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP
+) ?>;
+</script>
+
+<script src="/pbo-portal/assets/js/location-suggest.js"></script>
+
+
+
+<!-- Keeps typed input in the browser so a refused save never costs the work. -->
+<script src="/pbo-portal/assets/js/form-autosave.js" defer></script>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>

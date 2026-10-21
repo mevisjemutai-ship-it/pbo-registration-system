@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/official-rules.php';
+require_once __DIR__ . '/../includes/excel-layout.php';
+require_once __DIR__ . '/../includes/application-labels.php';
 
 requireLogin();
 requirePasswordChanged();
@@ -100,9 +103,13 @@ function formatDateValue(
 |--------------------------------------------------------------------------
 */
 
-$applicationId = filter_input(
-    INPUT_GET,
-    'id',
+/*
+| filter_var on $_GET rather than filter_input(INPUT_GET): identical for a
+| real request, and it lets the export be rendered by a test without a web
+| server, which is how the layout below is checked.
+*/
+$applicationId = filter_var(
+    $_GET['id'] ?? null,
     FILTER_VALIDATE_INT
 );
 
@@ -344,8 +351,8 @@ $stmt = $pdo->prepare(
     ORDER BY
         CASE UPPER(TRIM(designation))
             WHEN 'CHAIRPERSON' THEN 1
-            WHEN 'TREASURER' THEN 2
-            WHEN 'SECRETARY' THEN 3
+            WHEN 'SECRETARY' THEN 2
+            WHEN 'TREASURER' THEN 3
             WHEN 'DIRECTOR' THEN 4
             ELSE 5
         END,
@@ -558,7 +565,135 @@ foreach ($beneficiaries as $beneficiary) {
 
 /*
 |--------------------------------------------------------------------------
-| Excel-compatible HTML workbook
+| Tax identification for officials
+|--------------------------------------------------------------------------
+|
+| Fetched separately so this export keeps working on a database where
+| database/add_official_tax_id.sql has not been run yet.
+*/
+
+if (officialTaxColumnsExist($pdo)) {
+
+    $taxStatement = $pdo->prepare(
+        'SELECT id, tax_id_type, tax_id_number
+           FROM application_officials
+          WHERE application_id = :application_id'
+    );
+
+    $taxStatement->execute(['application_id' => $applicationId]);
+
+    $taxRows = [];
+
+    foreach ($taxStatement->fetchAll(PDO::FETCH_ASSOC) as $taxRow) {
+        $taxRows[(int) $taxRow['id']] = $taxRow;
+    }
+
+    foreach ($principalOfficials as $designation => $official) {
+        if ($official !== null && isset($taxRows[(int) $official['id']])) {
+            $principalOfficials[$designation] += $taxRows[(int) $official['id']];
+        }
+    }
+
+    foreach ($directors as $index => $director) {
+        if (isset($taxRows[(int) $director['id']])) {
+            $directors[$index] += $taxRows[(int) $director['id']];
+        }
+    }
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| What will actually be printed
+|--------------------------------------------------------------------------
+|
+| Worked out before any markup, so a section with nothing in it can be
+| left out altogether rather than printed as an empty shell.
+*/
+
+$isInternational = strtolower((string) $application['registration_type']) === 'international';
+
+$internationalFields = [];
+
+if ($isInternational && is_array($internationalDetails)) {
+    $internationalFields = array_filter([
+        'Parent Organization' => $internationalDetails['parent_organization_name'] ?? '',
+        'Country of Origin' => $internationalDetails['country_of_origin'] ?? '',
+        'Registration Number' => $internationalDetails['registration_number'] ?? '',
+        'Physical Address' => $internationalDetails['parent_physical_address'] ?? '',
+        'Postal Address' => implode(' - ', array_filter([
+            trim((string) ($internationalDetails['parent_postal_address'] ?? '')),
+            trim((string) ($internationalDetails['parent_postal_code'] ?? '')),
+        ], 'xlFilled')),
+        'Telephone' => $internationalDetails['parent_phone_number'] ?? '',
+        'Email' => $internationalDetails['parent_email'] ?? '',
+        'Contact Person' => $internationalDetails['contact_person_name'] ?? '',
+        'Contact Telephone' => $internationalDetails['contact_person_phone'] ?? '',
+        'Contact Email' => $internationalDetails['contact_person_email'] ?? '',
+    ], 'xlFilled');
+}
+
+/* A location with nothing but a county name is still worth a row. */
+$operatingLocations = array_values(array_filter(
+    $operatingLocations,
+    static fn ($row) => xlFilled($row['county'] ?? '')
+));
+
+$officialsToPrint = array_values(array_filter([
+    $principalOfficials['CHAIRPERSON'] ?? null,
+    $principalOfficials['SECRETARY'] ?? null,
+    $principalOfficials['TREASURER'] ?? null,
+]));
+
+/* Objectives and beneficiaries, with the free-text "Other" pulled out. */
+$objectiveRows = [];
+$objectiveOther = '';
+
+foreach ($objectives as $objective) {
+    $code = (string) ($objective['objective_code'] ?? '');
+
+    if ($code === 'OTHER') {
+        $objectiveOther = trim((string) ($objective['description'] ?? ''));
+        continue;
+    }
+
+    if ($code !== '') {
+        $objectiveRows[] = [
+            'label' => pboCodeLabel($code, pboObjectiveLabels()),
+            'note' => trim((string) ($objective['description'] ?? '')),
+        ];
+    }
+}
+
+$beneficiaryRows = [];
+
+foreach ($beneficiaries as $beneficiary) {
+    $code = (string) ($beneficiary['beneficiary_code'] ?? '');
+
+    if ($code === 'OTHER' || $code === '') {
+        continue;
+    }
+
+    $beneficiaryRows[] = [
+        'label' => pboCodeLabel($code, pboBeneficiaryLabels()),
+        'note' => trim((string) ($beneficiary['description'] ?? '')),
+    ];
+}
+
+$sectionNumber = 0;
+
+/** Sections are numbered as they print, so a skipped one leaves no hole. */
+function nextSection(): string
+{
+    global $sectionNumber;
+
+    return (string) ++$sectionNumber;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Send it
 |--------------------------------------------------------------------------
 */
 
@@ -567,23 +702,12 @@ $filename =
     . preg_replace(
         '/[^A-Za-z0-9_-]+/',
         '_',
-        (string) (
-            $application['application_reference']
-            ?? $applicationId
-        )
+        (string) ($application['application_reference'] ?? $applicationId)
     )
     . '.xls';
 
-header(
-    'Content-Type: application/vnd.ms-excel; charset=UTF-8'
-);
-
-header(
-    'Content-Disposition: attachment; filename="' .
-    $filename .
-    '"'
-);
-
+header('Content-Type: application/vnd.ms-excel; charset=UTF-8');
+header('Content-Disposition: attachment; filename="' . $filename . '"');
 header('Cache-Control: max-age=0');
 
 ?>
@@ -594,1813 +718,303 @@ header('Cache-Control: max-age=0');
 
 <meta charset="UTF-8">
 
-<title>
-PBO Registration Record
-</title>
+<title>PBO Registration Record</title>
 
 <style>
-
-@page {
-    size: A4 portrait;
-    margin: 0.45in;
-}
-
-body {
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 10pt;
-    color: #172b3a;
-    margin: 0;
-    padding: 0;
-}
-
-table {
-    width: 100%;
-    border-collapse: collapse;
-    table-layout: fixed;
-}
-
-td,
-th {
-    border: 1px solid #d7e1e8;
-    padding: 7px 8px;
-    vertical-align: top;
-    word-wrap: break-word;
-}
-
-.cover {
-    background: #123f67;
-    color: #ffffff;
-    border: 0;
-}
-
-.cover td {
-    border: 0;
-    padding: 18px 20px;
-}
-
-.cover-authority {
-    font-size: 9pt;
-    font-weight: bold;
-}
-
-.cover-title {
-    font-size: 20pt;
-    font-weight: bold;
-    margin-top: 5px;
-}
-
-.cover-subtitle {
-    font-size: 9pt;
-    margin-top: 5px;
-}
-
-.reference {
-    background: #082d4b;
-    color: #ffffff;
-    font-weight: bold;
-    padding: 7px 10px;
-    display: inline-block;
-    margin-top: 10px;
-}
-
-.identity {
-    margin-top: 0;
-}
-
-.identity td {
-    border-top: 3px solid #d69a18;
-    background: #f6f9fb;
-}
-
-.identity-label {
-    display: block;
-    font-size: 8pt;
-    color: #71818e;
-    font-weight: bold;
-    text-transform: uppercase;
-    margin-bottom: 4px;
-}
-
-.identity-value {
-    font-size: 11pt;
-    font-weight: bold;
-}
-
-.section {
-    margin-top: 16px;
-}
-
-.section-title {
-    background: #123f67;
-    color: #ffffff;
-    font-size: 12pt;
-    font-weight: bold;
-    padding: 8px 10px;
-}
-
-.section-subtitle {
-    display: block;
-    font-size: 8pt;
-    font-weight: normal;
-    margin-top: 3px;
-}
-
-.card-title {
-    background: #eaf5fb;
-    color: #082d4b;
-    font-weight: bold;
-    text-transform: uppercase;
-    font-size: 8pt;
-}
-
-.card-title-gold {
-    background: #fff7df;
-    color: #8d6000;
-}
-
-.label {
-    color: #71818e;
-    font-size: 7pt;
-    font-weight: bold;
-    text-transform: uppercase;
-}
-
-.value {
-    font-size: 9pt;
-    font-weight: bold;
-}
-
-.section-gap {
-    height: 10px;
-    border: 0;
-}
-
-.selected {
-    background: #eaf7ef;
-    border: 1px solid #b7ddc5;
-}
-
-.check {
-    font-weight: bold;
-    color: #197149;
-}
-
-.footer {
-    margin-top: 18px;
-}
-
-.footer-accent {
-    background: #d69a18;
-    height: 4px;
-}
-
-.footer-note {
-    font-size: 8pt;
-    color: #71818e;
-}
-
-.no-border {
-    border: 0 !important;
-}
-
-.small {
-    font-size: 8pt;
-}
-
-.signature-note {
-    color: #71818e;
-    font-style: italic;
-}
-
-.official-present {
-    background: #f8fbfd;
-}
-
-.signature-present {
-    color: #197149;
-    font-weight: bold;
-}
-
-@media print {
-
-    .section {
-        break-inside: auto;
-    }
-
-    tr,
-    .card {
-        break-inside: avoid;
-    }
-
-}
-
+<?= xlStyles() ?>
 </style>
 
 </head>
 
 <body>
 
+
 <!-- ==========================================================
-     COVER
+     MASTHEAD
+
+     Three rows, not three spans in one cell. Excel ignores
+     display:block, so stacked spans arrive as one run-together
+     string - which is how the authority, the title and the
+     organization name all ended up crushed into cell A1.
      ========================================================== -->
 
 <table class="cover">
+<?= xlGrid() ?>
+<tr><td colspan="<?= XL_GRID ?>" class="cover-authority">PUBLIC BENEFIT ORGANIZATIONS REGULATORY AUTHORITY</td></tr>
+<tr><td colspan="<?= XL_GRID ?>" class="cover-title">Registration Record</td></tr>
+<tr><td colspan="<?= XL_GRID ?>" class="cover-name"><?= xl((string) $application['pbo_name']) ?></td></tr>
+</table>
 
-<tr>
-
-<td>
-
-<div class="cover-authority">
-Public Benefit Organizations Regulatory Authority
-</div>
-
-<div class="cover-title">
-PBO Registration Record
-</div>
-
-<div class="cover-subtitle">
-Complete submitted application record
-</div>
-
-<div class="reference">
-Application Reference:
-<?= e((string) $application['application_reference']) ?>
-</div>
-
-</td>
-
-</tr>
-
+<table>
+<?= xlGrid() ?>
+<?= xlFields([
+    'Reference' => $application['application_reference'],
+    'Status' => ucwords((string) $application['status']),
+    'Registration Number' => $application['pbo_registration_number'],
+    'Date of Registration' => formatDateValue($application['registration_date']),
+    'Type of Organization' => organizationTypeLabel((string) $application['registration_type']),
+    'Produced' => date('j M Y'),
+], 2) ?>
 </table>
 
 
 <!-- ==========================================================
-     IDENTITY
+     ORGANIZATION
      ========================================================== -->
 
-<table class="identity">
-
-<tr>
-
-<td width="45%">
-
-<span class="identity-label">
-Organization
-</span>
-
-<span class="identity-value">
-<?= e((string) $application['pbo_name']) ?>
-</span>
-
-</td>
-
-<td width="25%">
-
-<span class="identity-label">
-Registration Number
-</span>
-
-<span class="identity-value">
-<?= excelValue($application['pbo_registration_number']) ?>
-</span>
-
-</td>
-
-<td width="30%">
-
-<span class="identity-label">
-Date of Registration
-</span>
-
-<span class="identity-value">
-<?= excelValue(
-    formatDateValue(
-        $application['registration_date']
-    )
-) ?>
-</span>
-
-</td>
-
-</tr>
-
-</table>
-
-
-<!-- ==========================================================
-     1. ORGANIZATION DETAILS
-     ========================================================== -->
-
-<table class="section">
-
-<tr>
-
-<td class="section-title">
-1. Organization Details
-<span class="section-subtitle">
-Classification, headquarters address and contact particulars
-</span>
-</td>
-
-</tr>
-
-</table>
-
+<?= xlGap() ?>
+<?= xlBand(nextSection(), 'Organization Details', 'Headquarters and contact particulars') ?>
 
 <table>
-
-<tr>
-<td colspan="3" class="card-title">
-Organization Classification
-</td>
-</tr>
-
-<tr>
-
-<td colspan="3">
-
-<div class="label">
-Type of Organization
-</div>
-
-<div class="value">
-<?= e(
-    organizationTypeLabel(
-        (string) $application['registration_type']
-    )
-) ?>
-</div>
-
-</td>
-
-</tr>
-
-</table>
-
-
-<table class="section-gap">
-<tr><td class="no-border"></td></tr>
-</table>
-
-
-<table>
-
-<tr>
-<td colspan="3" class="card-title">
-Headquarters Address &amp; Contact
-</td>
-</tr>
-
-<tr>
-
-<td>
-
-<div class="label">
-County
-</div>
-
-<div class="value">
-<?= excelValue($address['county']) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Town / City
-</div>
-
-<div class="value">
-<?= excelValue($address['town']) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Sub-County
-</div>
-
-<div class="value">
-<?= excelValue($address['sub_county']) ?>
-</div>
-
-</td>
-
-</tr>
-
-<tr>
-
-<td colspan="3">
-
-<div class="label">
-Physical Address
-</div>
-
-<div class="value">
-<?= excelValue($address['physical_address']) ?>
-</div>
-
-</td>
-
-</tr>
-
-<tr>
-
-<td>
-
-<div class="label">
-Postal Address
-</div>
-
-<div class="value">
-<?= excelValue($address['postal_address']) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Postal Code
-</div>
-
-<div class="value">
-<?= excelValue($address['postal_code']) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Organization Phone
-</div>
-
-<div class="value">
-<?= excelValue($address['phone_number']) ?>
-</div>
-
-</td>
-
-</tr>
-
-<tr>
-
-<td>
-
-<div class="label">
-Alternative Phone
-</div>
-
-<div class="value">
-<?= excelValue($address['alternative_phone_number']) ?>
-</div>
-
-</td>
-
-<td colspan="2">
-
-<div class="label">
-Organization Email
-</div>
-
-<div class="value">
-<?= excelValue($address['email']) ?>
-</div>
-
-</td>
-
-</tr>
-
-</table>
-
-
-<!-- ==========================================================
-     OTHER AREAS OF OPERATION
-     ========================================================== -->
-
-<table class="section-gap">
-<tr><td class="no-border"></td></tr>
-</table>
-
-<table>
-
-<tr>
-
-<td colspan="3" class="card-title">
-
-Other Areas of Operation
-
-</td>
-
-</tr>
-
-<tr>
-
-<td colspan="3">
-
-<div class="label">
-Additional Operating Locations
-</div>
-
-<div class="value">
-
-<?= $operatingLocations !== []
-    ? 'Yes — '
-        . count($operatingLocations)
-        . ' additional operating location(s)'
-    : 'No — No additional operating locations recorded.' ?>
-
-</div>
-
-</td>
-
-</tr>
-
-<?php foreach (
-    $operatingLocations
-    as $index => $location
-): ?>
-
-<tr>
-
-<td colspan="3" class="card-title">
-
-Operating Location <?= $index + 1 ?>
-
-</td>
-
-</tr>
-
-<tr>
-
-<td>
-
-<div class="label">
-County
-</div>
-
-<div class="value">
-<?= excelValue($location['county']) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Sub-County
-</div>
-
-<div class="value">
-<?= excelValue($location['sub_county']) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Postal Code
-</div>
-
-<div class="value">
-<?= excelValue($location['postal_code']) ?>
-</div>
-
-</td>
-
-</tr>
-
-<tr>
-
-<td colspan="3">
-
-<div class="label">
-Physical Address
-</div>
-
-<div class="value">
-<?= excelValue($location['physical_address']) ?>
-</div>
-
-</td>
-
-</tr>
-
-<tr>
-
-<td>
-
-<div class="label">
-Postal Address
-</div>
-
-<div class="value">
-<?= excelValue($location['postal_address']) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Phone
-</div>
-
-<div class="value">
-<?= excelValue($location['phone_number']) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Alternative Phone
-</div>
-
-<div class="value">
-<?= excelValue($location['alternative_phone_number']) ?>
-</div>
-
-</td>
-
-</tr>
-
-<tr>
-
-<td colspan="3">
-
-<div class="label">
-Email
-</div>
-
-<div class="value">
-<?= excelValue($location['email']) ?>
-</div>
-
-</td>
-
-</tr>
-
-<?php endforeach; ?>
-
-</table>
-
-
-<?php if (
-    (string) $application['registration_type']
-    === 'international'
-    && $internationalDetails !== false
-    && $internationalDetails !== null
-): ?>
-
-<!-- ==========================================================
-     INTERNATIONAL
-     ========================================================== -->
-
-<table class="section-gap">
-<tr><td class="no-border"></td></tr>
-</table>
-
-<table>
-
-<tr>
-
-<td colspan="3"
-    class="card-title card-title-gold">
-
-International Registration Details
-
-</td>
-
-</tr>
-
-<tr>
-
-<td>
-
-<div class="label">
-Parent Organization
-</div>
-
-<div class="value">
-<?= excelValue(
-    $internationalDetails[
-        'parent_organization_name'
-    ]
-) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Country of Registration
-</div>
-
-<div class="value">
-<?= excelValue(
-    $internationalDetails[
-        'country_of_origin'
-    ]
-) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Parent Registration Number
-</div>
-
-<div class="value">
-<?= excelValue(
-    $internationalDetails[
-        'registration_number'
-    ]
-) ?>
-</div>
-
-</td>
-
-</tr>
-
-<tr>
-
-<td>
-
-<div class="label">
-Parent Physical Address
-</div>
-
-<div class="value">
-<?= excelValue(
-    $internationalDetails[
-        'parent_physical_address'
-    ]
-) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Parent Postal Address
-</div>
-
-<div class="value">
-<?= excelValue(
-    $internationalDetails[
-        'parent_postal_address'
-    ]
-) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Parent Postal Code
-</div>
-
-<div class="value">
-<?= excelValue(
-    $internationalDetails[
-        'parent_postal_code'
-    ]
-) ?>
-</div>
-
-</td>
-
-</tr>
-
-<tr>
-
-<td>
-
-<div class="label">
-Parent Phone
-</div>
-
-<div class="value">
-<?= excelValue(
-    $internationalDetails[
-        'parent_phone_number'
-    ]
-) ?>
-</div>
-
-</td>
-
-<td colspan="2">
-
-<div class="label">
-Parent Email
-</div>
-
-<div class="value">
-<?= excelValue(
-    $internationalDetails[
-        'parent_email'
-    ]
-) ?>
-</div>
-
-</td>
-
-</tr>
-
-</table>
-
-
-<table class="section-gap">
-<tr><td class="no-border"></td></tr>
-</table>
-
-<table>
-
-<tr>
-
-<td colspan="3"
-    class="card-title card-title-gold">
-
-Parent Organization Contact Person
-
-</td>
-
-</tr>
-
-<tr>
-
-<td>
-
-<div class="label">
-Contact Person
-</div>
-
-<div class="value">
-<?= excelValue(
-    $internationalDetails[
-        'contact_person_name'
-    ]
-) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Phone
-</div>
-
-<div class="value">
-<?= excelValue(
-    $internationalDetails[
-        'contact_person_phone'
-    ]
-) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Email
-</div>
-
-<div class="value">
-<?= excelValue(
-    $internationalDetails[
-        'contact_person_email'
-    ]
-) ?>
-</div>
-
-</td>
-
-</tr>
-
-</table>
-
-<?php endif; ?>
-
-
-<!-- ==========================================================
-     2. OBJECTIVES
-     ========================================================== -->
-
-<table class="section">
-
-<tr>
-
-<td class="section-title">
-
-2. Public Benefit Purposes
-
-<span class="section-subtitle">
-Registered areas of public benefit activity
-</span>
-
-</td>
-
-</tr>
-
-</table>
-
-
-<table>
-
-<tr>
-<td class="card-title">
-Selected Public Benefit Purposes
-</td>
-</tr>
-
-<?php if ($objectives !== []): ?>
-
-<?php foreach ($objectives as $objective): ?>
+<?= xlGrid() ?>
 
 <?php
-
-$code = (string) (
-    $objective['objective_code'] ?? ''
-);
-
-$label =
-    $objectiveLabels[$code]
-    ?? ucwords(
-        strtolower(
-            str_replace(
-                '_',
-                ' ',
-                $code
-            )
-        )
-    );
-
+$headOffice = xlFields([
+    'County' => $address['county'],
+    'Sub-County' => $address['sub_county'],
+    'Town / City' => $address['town'],
+    'Postal Code' => $address['postal_code'],
+    'Physical Address' => $address['physical_address'],
+    'Postal Address' => $address['postal_address'],
+    'Telephone' => $address['phone_number'],
+    'Alternative Telephone' => $address['alternative_phone_number'],
+    'Email' => $address['email'],
+], 2);
 ?>
 
-<tr>
+<?= xlSub('Head Office') ?>
 
-<td class="selected">
-
-<span class="check">
-✓
-</span>
-
-<?= e($label) ?>
-
-</td>
-
-</tr>
-
-<?php endforeach; ?>
-
+<?php if ($headOffice !== ''): ?>
+    <?= $headOffice ?>
 <?php else: ?>
-
-<tr>
-
-<td>
-No public benefit purposes recorded.
-</td>
-
-</tr>
-
+    <tr><td colspan="<?= XL_GRID ?>" class="v plain">No head office address recorded.</td></tr>
 <?php endif; ?>
 
-</table>
+<?php if ($operatingLocations !== []): ?>
 
-
-<?php foreach ($objectives as $objective): ?>
-
-<?php if (
-    (string) $objective['objective_code']
-    === 'OTHER'
-    && trim(
-        (string) (
-            $objective['description'] ?? ''
-        )
-    ) !== ''
-): ?>
-
-<table class="section-gap">
-<tr><td class="no-border"></td></tr>
-</table>
-
-<table>
-
-<tr>
-
-<td class="card-title">
-Any Other — Description
-</td>
-
-</tr>
-
-<tr>
-
-<td>
-<?= e(
-    (string) $objective['description']
-) ?>
-</td>
-
-</tr>
-
-</table>
-
-<?php endif; ?>
-
-<?php endforeach; ?>
-
-
-<!-- ==========================================================
-     3. BENEFICIARIES
-     ========================================================== -->
-
-<table class="section">
-
-<tr>
-
-<td class="section-title">
-
-3. Beneficiaries
-
-<span class="section-subtitle">
-Persons or groups served by the organization
-</span>
-
-</td>
-
-</tr>
-
-</table>
-
-
-<?php
-
-$isPublic = false;
-
-foreach ($beneficiaries as $beneficiary) {
-
-    if (
-        (string) $beneficiary['beneficiary_code']
-        === 'PUBLIC'
-    ) {
-        $isPublic = true;
-        break;
-    }
-}
-
-?>
-
-
-<table>
-
-<tr>
-
-<td class="card-title">
-Beneficiary Category
-</td>
-
-</tr>
-
-<tr>
-
-<td>
-
-<div class="label">
-Scope
-</div>
-
-<div class="value">
-
-<?= $isPublic
-    ? 'Public'
-    : (
-        $beneficiaries !== []
-            ? 'Section of the Public'
-            : 'Not Recorded'
+    <?= xlSub(
+        'Other Areas of Operation',
+        count($operatingLocations) . (count($operatingLocations) === 1 ? ' county' : ' counties')
     ) ?>
 
-</div>
+    <tr>
+        <?= xlHeading('County', 2, 'left') ?>
+        <?= xlHeading('Sub-County', 2, 'left') ?>
+        <?= xlHeading('Physical Address', 4, 'left') ?>
+        <?= xlHeading('Telephone', 2) ?>
+        <?= xlHeading('Email', 2, 'left') ?>
+    </tr>
 
-</td>
-
-</tr>
-
-</table>
-
-
-<?php if (
-    !$isPublic
-    && $beneficiaries !== []
-): ?>
-
-<table class="section-gap">
-<tr><td class="no-border"></td></tr>
-</table>
-
-<table>
-
-<tr>
-
-<td class="card-title">
-Selected Beneficiary Categories
-</td>
-
-</tr>
-
-<?php foreach ($beneficiaries as $beneficiary): ?>
-
-<?php
-
-$code = (string) (
-    $beneficiary['beneficiary_code']
-    ?? ''
-);
-
-if ($code === 'PUBLIC') {
-    continue;
-}
-
-$label =
-    $beneficiaryLabels[$code]
-    ?? ucwords(
-        strtolower(
-            str_replace(
-                '_',
-                ' ',
-                $code
-            )
-        )
-    );
-
-?>
-
-<tr>
-
-<td class="selected">
-
-<span class="check">
-✓
-</span>
-
-<?= e($label) ?>
-
-</td>
-
-</tr>
-
-<?php endforeach; ?>
-
-</table>
-
-<?php endif; ?>
-
-
-<?php if (
-    $beneficiaryOtherSpecify !== ''
-    || $beneficiaryOtherDescription !== ''
-): ?>
-
-<table class="section-gap">
-<tr><td class="no-border"></td></tr>
-</table>
-
-<table>
-
-<tr>
-
-<td class="card-title">
-Others Not Listed Here
-</td>
-
-</tr>
-
-<?php if ($beneficiaryOtherSpecify !== ''): ?>
-
-<tr>
-
-<td>
-
-<div class="label">
-Specify
-</div>
-
-<div class="value">
-<?= e($beneficiaryOtherSpecify) ?>
-</div>
-
-</td>
-
-</tr>
-
-<?php endif; ?>
-
-<?php if (
-    $beneficiaryOtherDescription !== ''
-): ?>
-
-<tr>
-
-<td>
-
-<div class="label">
-Description
-</div>
-
-<div class="value">
-<?= e($beneficiaryOtherDescription) ?>
-</div>
-
-</td>
-
-</tr>
+    <?php foreach ($operatingLocations as $location): ?>
+        <tr>
+            <?= xlCell($location['county'], 2) ?>
+            <?= xlCell($location['sub_county'], 2, 'v plain') ?>
+            <?= xlCell($location['physical_address'], 4, 'v plain') ?>
+            <?= xlCell($location['phone_number'], 2, 'v plain c') ?>
+            <?= xlCell($location['email'], 2, 'v plain') ?>
+        </tr>
+    <?php endforeach; ?>
 
 <?php endif; ?>
 
 </table>
+
+<?php if ($internationalFields !== []): ?>
+
+    <?= xlGap() ?>
+    <?= xlBand(nextSection(), 'Parent Organization', 'Recorded for an international organization') ?>
+
+    <table>
+    <?= xlGrid() ?>
+    <?= xlFields($internationalFields, 2) ?>
+    </table>
 
 <?php endif; ?>
 
 
 <!-- ==========================================================
-     4. FINANCIAL YEAR
+     PURPOSES AND BENEFICIARIES
+
+     One per row. They used to be printed side by side in a
+     single cell, which arrived in Excel as one long unreadable
+     string: "Education Poverty Eradication Hiv Aids Water,
+     Sanitation and Hygiene".
      ========================================================== -->
 
-<table class="section">
+<?php if ($objectiveRows !== [] || $objectiveOther !== ''): ?>
 
-<tr>
+    <?= xlGap() ?>
+    <?= xlBand(nextSection(), 'Public Benefit Purposes', 'What the organization is registered to pursue') ?>
 
-<td class="section-title">
+    <table>
+    <?= xlGrid() ?>
 
-4. Financial Year
+    <?php
+    /*
+    | Most purposes carry no note. Printing an empty column beside every
+    | one of them is the same empty-box problem as a dash, so the column
+    | only appears when at least one row has something to put in it.
+    */
+    $anyObjectiveNote = array_filter(
+        array_column($objectiveRows, 'note'),
+        'xlFilled'
+    ) !== [];
+    ?>
 
-<span class="section-subtitle">
-Approved twelve-month reporting period
-</span>
+    <?php foreach ($objectiveRows as $index => $objectiveRow): ?>
+        <tr>
+            <?= xlCell((string) ($index + 1), 1, 'v plain c') ?>
+            <?= xlCell($objectiveRow['label'], $anyObjectiveNote ? 5 : 11) ?>
+            <?= $anyObjectiveNote ? xlCell($objectiveRow['note'], 6, 'v plain') : '' ?>
+        </tr>
+    <?php endforeach; ?>
 
-</td>
+    <?php if ($objectiveOther !== ''): ?>
+        <?= xlSub('Any Other Purpose') ?>
+        <tr><?= xlCell($objectiveOther, XL_GRID, 'v plain') ?></tr>
+    <?php endif; ?>
 
-</tr>
+    </table>
 
-</table>
+<?php endif; ?>
+
+<?php if ($beneficiaryRows !== [] || $beneficiaryOtherDescription !== '' || $beneficiaryOtherSpecify !== ''): ?>
+
+    <?= xlGap() ?>
+    <?= xlBand(nextSection(), 'Beneficiaries', 'Who the organization serves') ?>
+
+    <table>
+    <?= xlGrid() ?>
+
+    <?php
+    $anyBeneficiaryNote = array_filter(
+        array_column($beneficiaryRows, 'note'),
+        'xlFilled'
+    ) !== [];
+    ?>
+
+    <?php foreach ($beneficiaryRows as $index => $beneficiaryRow): ?>
+        <tr>
+            <?= xlCell((string) ($index + 1), 1, 'v plain c') ?>
+            <?= xlCell($beneficiaryRow['label'], $anyBeneficiaryNote ? 5 : 11) ?>
+            <?= $anyBeneficiaryNote ? xlCell($beneficiaryRow['note'], 6, 'v plain') : '' ?>
+        </tr>
+    <?php endforeach; ?>
+
+    <?php if ($beneficiaryOtherSpecify !== '' || $beneficiaryOtherDescription !== ''): ?>
+        <?= xlSub('Any Other Beneficiary') ?>
+        <?= xlFields([
+            'Specify' => $beneficiaryOtherSpecify,
+            'Description' => $beneficiaryOtherDescription,
+        ], 1) ?>
+    <?php endif; ?>
+
+    </table>
+
+<?php endif; ?>
 
 
-<table>
-
-<tr>
-
-<td class="card-title">
-Selected Financial Year
-</td>
-
-</tr>
-
-<tr>
-
-<td>
-
-<div class="value">
-
-<?= $financialYearLabel !== ''
-    ? e($financialYearLabel)
-    : 'Financial year information is not available.' ?>
-
-</div>
+<!-- ==========================================================
+     FINANCIAL YEAR
+     ========================================================== -->
 
 <?php if ($financialYearLabel !== ''): ?>
 
-<div class="small">
-12 Month Period
-</div>
+    <?= xlGap() ?>
+    <?= xlBand(nextSection(), 'Financial Year') ?>
+
+    <table>
+    <?= xlGrid() ?>
+    <?= xlFields(['Financial Year Runs' => $financialYearLabel], 1) ?>
+    </table>
 
 <?php endif; ?>
-
-</td>
-
-</tr>
-
-</table>
 
 
 <!-- ==========================================================
-     5. PRINCIPAL OFFICIALS
+     OFFICIALS
      ========================================================== -->
 
-<table class="section">
-
-<tr>
-
-<td class="section-title">
-
-5. Principal Officials
-
-<span class="section-subtitle">
-Chairperson, Treasurer and Secretary
-</span>
-
-</td>
-
-</tr>
-
-</table>
-
-
-<?php foreach (
-    [
-        'CHAIRPERSON',
-        'TREASURER',
-        'SECRETARY',
-    ] as $designation
-): ?>
-
-<?php
-
-$official =
-    $principalOfficials[$designation];
-
-?>
-
-<table>
-
-<tr>
-
-<td colspan="3"
-    class="card-title">
-
-<?= e(
-    designationLabel($designation)
-) ?>
-
-</td>
-
-</tr>
-
-<?php if ($official === null): ?>
-
-<tr>
-
-<td colspan="3">
-
-<div class="label">
-Status
-</div>
-
-<div class="value">
-No <?= e(
-    strtolower(
-        designationLabel($designation)
-    )
-) ?> record found.
-</div>
-
-</td>
-
-</tr>
-
-<?php else: ?>
-
-<tr class="official-present">
-
-<td>
-
-<div class="label">
-Name
-</div>
-
-<div class="value">
-<?= excelValue(
-    $official['full_name'] ?? ''
-) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Nationality
-</div>
-
-<div class="value">
-<?= excelValue(
-    $official['nationality'] ?? ''
-) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-ID / Passport Number
-</div>
-
-<div class="value">
-<?= excelValue(
-    $official['id_passport_number'] ?? ''
-) ?>
-</div>
-
-</td>
-
-</tr>
-
-<tr>
-
-<td>
-
-<div class="label">
-KRA PIN
-</div>
-
-<div class="value">
-<?= excelValue(
-    $official['kra_pin'] ?? ''
-) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Phone Number
-</div>
-
-<div class="value">
-<?= excelValue(
-    $official['phone_number'] ?? ''
-) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Email
-</div>
-
-<div class="value">
-<?= excelValue(
-    $official['email'] ?? ''
-) ?>
-</div>
-
-</td>
-
-</tr>
-
-<tr>
-
-<td colspan="3">
-
-<div class="label">
-Signature
-</div>
-
-<?php
-
-$signature = trim(
-    (string) (
-        $official['signature'] ?? ''
-    )
-);
-
-?>
-
-<?php if ($signature !== ''): ?>
-
-<div class="value signature-present">
-Signature captured
-</div>
-
-<div class="signature-note">
-<?= e($signature) ?>
-</div>
-
-<?php else: ?>
-
-<div class="signature-note">
-No signature file recorded.
-</div>
+<?php if ($officialsToPrint !== [] || $directors !== []): ?>
+
+    <?= xlGap() ?>
+    <?= xlBand(nextSection(), 'Officials and Directors', 'As recorded on the application') ?>
+
+    <table>
+    <?= xlGrid() ?>
+
+    <?php foreach ($officialsToPrint as $official): ?>
+
+        <?php
+        $tax = officialTaxIdDisplay($official);
+        $signature = trim((string) ($official['signature'] ?? ''));
+        ?>
+
+        <?= xlSub(
+            designationLabel((string) $official['designation']),
+            $signature !== '' ? 'Signature on file' : ''
+        ) ?>
+
+        <?= xlFields([
+            'Full Name' => $official['full_name'],
+            'Nationality' => $official['nationality'],
+            'ID / Passport Number' => $official['id_passport_number'],
+            ($tax['label'] ?? 'KRA PIN') => $tax['value'] ?? '',
+            'Telephone' => $official['phone_number'],
+            'Email' => $official['email'],
+        ], 2) ?>
+
+    <?php endforeach; ?>
+
+    <?php if ($directors !== []): ?>
+
+        <?= xlSub(
+            'Directors',
+            count($directors) . (count($directors) === 1 ? ' director' : ' directors')
+        ) ?>
+
+        <tr>
+            <?= xlHeading('Name', 3, 'left') ?>
+            <?= xlHeading('Nationality', 2) ?>
+            <?= xlHeading('ID / Passport', 2) ?>
+            <?= xlHeading('Tax Identification', 3, 'left') ?>
+            <?= xlHeading('Telephone', 2) ?>
+        </tr>
+
+        <?php foreach ($directors as $director): ?>
+            <?php $directorTax = officialTaxIdDisplay($director); ?>
+            <tr>
+                <?= xlCell($director['full_name'], 3) ?>
+                <?= xlCell($director['nationality'], 2, 'v plain c') ?>
+                <?= xlCell($director['id_passport_number'], 2, 'v plain c') ?>
+                <?= xlCell(
+                    $directorTax === null
+                        ? ''
+                        : $directorTax['label'] . ': ' . $directorTax['value'],
+                    3,
+                    'v plain'
+                ) ?>
+                <?= xlCell($director['phone_number'], 2, 'v plain c') ?>
+            </tr>
+        <?php endforeach; ?>
+
+    <?php endif; ?>
+
+    </table>
 
 <?php endif; ?>
 
-</td>
 
-</tr>
-
-<?php endif; ?>
-
-</table>
-
-<table class="section-gap">
-<tr><td class="no-border"></td></tr>
-</table>
-
-<?php endforeach; ?>
-
-
-<!-- ==========================================================
-     5B. DIRECTORS
-     ========================================================== -->
-
-<table>
-
+<table class="footnote">
+<?= xlGrid() ?>
 <tr>
-
-<td colspan="3"
-    class="card-title">
-
-Additional Directors
-
-</td>
-
+    <td colspan="<?= XL_GRID ?>">
+        Produced from the PBO Registration and Records Management System on
+        <?= xl(date('j F Y \a\t H:i')) ?>.
+        Fields the organization did not provide are not shown.
+    </td>
 </tr>
-
-<?php if ($directors === []): ?>
-
-<tr>
-
-<td colspan="3">
-
-<div class="value">
-No additional directors recorded.
-</div>
-
-</td>
-
-</tr>
-
-<?php else: ?>
-
-<?php foreach (
-    $directors
-    as $index => $director
-): ?>
-
-<tr>
-
-<td colspan="3"
-    class="card-title">
-
-Director <?= $index + 1 ?>
-
-</td>
-
-</tr>
-
-<tr>
-
-<td>
-
-<div class="label">
-Name
-</div>
-
-<div class="value">
-<?= excelValue(
-    $director['full_name'] ?? ''
-) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Nationality
-</div>
-
-<div class="value">
-<?= excelValue(
-    $director['nationality'] ?? ''
-) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-ID / Passport Number
-</div>
-
-<div class="value">
-<?= excelValue(
-    $director['id_passport_number'] ?? ''
-) ?>
-</div>
-
-</td>
-
-</tr>
-
-<tr>
-
-<td>
-
-<div class="label">
-KRA PIN
-</div>
-
-<div class="value">
-<?= excelValue(
-    $director['kra_pin'] ?? ''
-) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Phone Number
-</div>
-
-<div class="value">
-<?= excelValue(
-    $director['phone_number'] ?? ''
-) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Email
-</div>
-
-<div class="value">
-<?= excelValue(
-    $director['email'] ?? ''
-) ?>
-</div>
-
-</td>
-
-</tr>
-
-<tr>
-
-<td colspan="3">
-
-<div class="label">
-Signature
-</div>
-
-<?php
-
-$signature = trim(
-    (string) (
-        $director['signature'] ?? ''
-    )
-);
-
-?>
-
-<?php if ($signature !== ''): ?>
-
-<div class="value signature-present">
-Signature captured
-</div>
-
-<div class="signature-note">
-<?= e($signature) ?>
-</div>
-
-<?php else: ?>
-
-<div class="signature-note">
-No signature file recorded.
-</div>
-
-<?php endif; ?>
-
-</td>
-
-</tr>
-
-<?php endforeach; ?>
-
-<?php endif; ?>
-
-</table>
-
-
-<!-- ==========================================================
-     RECORD INFORMATION
-     ========================================================== -->
-
-<table class="footer">
-
-<tr>
-
-<td colspan="4"
-    class="footer-accent no-border">
-</td>
-
-</tr>
-
-<tr>
-
-<td>
-
-<div class="label">
-Application Reference
-</div>
-
-<div class="value">
-<?= excelValue(
-    $application['application_reference']
-) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Record Status
-</div>
-
-<div class="value">
-Submitted
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Submitted Date
-</div>
-
-<div class="value">
-<?= excelValue(
-    formatDateValue(
-        $application['submitted_at'],
-        'd F Y, H:i'
-    )
-) ?>
-</div>
-
-</td>
-
-<td>
-
-<div class="label">
-Type of Organization
-</div>
-
-<div class="value">
-<?= e(
-    organizationTypeLabel(
-        (string) $application['registration_type']
-    )
-) ?>
-</div>
-
-</td>
-
-</tr>
-
-<tr>
-
-<td colspan="4">
-
-<div class="footer-note">
-
-This record presents the information captured in the
-PBO Registration System for this submitted application.
-Optional information that was not supplied is intentionally
-omitted from the record.
-
-</div>
-
-</td>
-
-</tr>
-
 </table>
 
 </body>
-
 </html>

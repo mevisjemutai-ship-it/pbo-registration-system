@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/official-rules.php';
 require_once __DIR__ . '/../includes/application-validation.php';
 
 requireLogin();
@@ -39,6 +40,12 @@ if (!$connection instanceof PDO) {
         'Database connection was not initialized as a PDO instance.'
     );
 }
+
+/*
+| The two tax-identification columns only exist once
+| database/add_official_tax_id.sql has been run.
+*/
+$hasTaxColumns = officialTaxColumnsExist($connection);
 
 
 /*
@@ -729,6 +736,7 @@ $statement =
             nationality,
             id_passport_number,
             kra_pin,
+            " . ($hasTaxColumns ? 'tax_id_type, tax_id_number,' : '') . "
             phone_number,
             email,
             signature
@@ -739,9 +747,9 @@ $statement =
             CASE designation
                 WHEN 'CHAIRPERSON'
                     THEN 1
-                WHEN 'TREASURER'
-                    THEN 2
                 WHEN 'SECRETARY'
+                    THEN 2
+                WHEN 'TREASURER'
                     THEN 3
                 WHEN 'DIRECTOR'
                     THEN 4
@@ -959,11 +967,20 @@ if (
 | Principal Officials
 |--------------------------------------------------------------------------
 |
-| Only Chairperson, Treasurer and Secretary are required.
+| Only Chairperson, Secretary and Treasurer are required.
 | Signatures are NOT required.
 |
 */
 
+/*
+| This list is what BLOCKS submission, and it was the last place still
+| demanding a KRA PIN and an email from every official. The wizard stopped
+| requiring them, so the form said "optional" and then the Review page
+| refused to submit - the worst of both.
+|
+| KRA PIN is handled separately below, by nationality, because for a
+| Kenyan official it IS required. Email is not required of anybody.
+*/
 $requiredOfficialFields = [
 
     'full_name'
@@ -975,14 +992,8 @@ $requiredOfficialFields = [
     'id_passport_number'
         => 'ID / Passport Number',
 
-    'kra_pin'
-        => 'KRA PIN',
-
     'phone_number'
         => 'Phone Number',
-
-    'email'
-        => 'Email',
 ];
 
 
@@ -1048,6 +1059,26 @@ foreach (
             $roleLabel .
             ' — Email is invalid.';
     }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Tax identification
+    |--------------------------------------------------------------------------
+    |
+    | One shared rule - includes/official-rules.php - so the Review page
+    | cannot disagree with the page the details were entered on. A Kenyan
+    | official needs a KRA PIN; anyone else may record a foreign tax number
+    | instead, or none at all.
+    |
+    */
+
+    foreach (
+        officialTaxIdErrors($official, $roleLabel)
+        as $taxError
+    ) {
+        $completionErrors[] = $taxError;
+    }
 }
 
 
@@ -1109,6 +1140,14 @@ foreach (
         $completionErrors[] =
             $directorLabel .
             ' — Email is invalid.';
+    }
+
+
+    foreach (
+        officialTaxIdErrors($director, $directorLabel)
+        as $taxError
+    ) {
+        $completionErrors[] = $taxError;
     }
 }
 
@@ -3107,7 +3146,7 @@ require_once __DIR__ .
                         </h2>
 
                         <p>
-                            Chairperson, Treasurer and Secretary.
+                            Chairperson, Secretary and Treasurer.
                         </p>
 
                     </div>
@@ -3135,8 +3174,8 @@ require_once __DIR__ .
                     <?php foreach (
                         [
                             'CHAIRPERSON',
-                            'TREASURER',
                             'SECRETARY',
+                            'TREASURER',
                         ]
                         as $designation
                     ): ?>
@@ -3249,6 +3288,42 @@ require_once __DIR__ .
                                         </span>
 
                                     </div>
+
+
+                                    <?php
+                                    /*
+                                     | A tax number from another country is
+                                     | shown under its own name, never under
+                                     | the heading "KRA PIN".
+                                     */
+                                    $foreignTax = trim(
+                                        (string) ($official['tax_id_number'] ?? '')
+                                    );
+
+                                    $foreignTaxType = trim(
+                                        (string) ($official['tax_id_type'] ?? '')
+                                    );
+                                    ?>
+
+                                    <?php if ($foreignTax !== ''): ?>
+
+                                        <div class="review-field">
+
+                                            <span class="review-field-label">
+                                                <?= e(
+                                                    $foreignTaxType !== ''
+                                                        ? 'Tax ID (' . $foreignTaxType . ')'
+                                                        : 'Tax ID'
+                                                ) ?>
+                                            </span>
+
+                                            <span class="review-field-value">
+                                                <?= e($foreignTax) ?>
+                                            </span>
+
+                                        </div>
+
+                                    <?php endif; ?>
 
 
                                     <div class="review-field">

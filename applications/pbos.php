@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/pbo-registry-filters.php';
 
 requireLogin();
 requirePasswordChanged();
@@ -126,6 +127,13 @@ function formatRegistrationDate(
 |--------------------------------------------------------------------------
 */
 
+/** Shorter alias used by the newer markup below. */
+function registryUrl(array $overrides = []): string
+{
+    return buildPboListUrl($overrides);
+}
+
+
 function buildPboListUrl(
     array $overrides = []
 ): string {
@@ -148,6 +156,23 @@ function buildPboListUrl(
             trim(
                 (string)
                 ($_GET['type'] ?? '')
+            ),
+
+        /*
+        | The alphabet and ordering travel with every other link on the
+        | page, so paging through "names beginning with B, oldest first"
+        | stays on B and stays oldest first.
+        */
+        'letter' =>
+            trim(
+                (string)
+                ($_GET['letter'] ?? '')
+            ),
+
+        'sort' =>
+            trim(
+                (string)
+                ($_GET['sort'] ?? '')
             ),
 
         'page' =>
@@ -239,6 +264,21 @@ $type =
         (string)
         ($_GET['type'] ?? '')
     );
+
+
+/*
+|--------------------------------------------------------------------------
+| Alphabet and ordering
+|--------------------------------------------------------------------------
+|
+| Read by the shared module so the export produces exactly the rows this
+| page is showing - see includes/pbo-registry-filters.php.
+*/
+
+$registryFilters = pboRegistryFilters($_GET);
+
+$letter = $registryFilters['letter'];
+$sort = $registryFilters['sort'];
 
 
 /*
@@ -341,109 +381,19 @@ $registrationYears =
 |--------------------------------------------------------------------------
 */
 
-$where = [
-
-    "status = 'submitted'",
-];
-
-
-$params = [];
-
-
 /*
-|--------------------------------------------------------------------------
-| Search
-|--------------------------------------------------------------------------
-|
-| IMPORTANT:
-| Use two separate PDO placeholders.
-| Reusing :search twice caused SQLSTATE[HY093].
-|
+| Built by includes/pbo-registry-filters.php, which the export also uses.
+| Two copies of this logic is how an export starts disagreeing with the
+| screen it was printed from.
 */
 
-if ($search !== '') {
+$registryWhere = pboRegistryWhere($registryFilters);
 
-    $where[] =
-        "
-        (
-            pbo_name LIKE :search_name
+$whereSql = $registryWhere['sql'];
+$params = $registryWhere['params'];
 
-            OR
-
-            pbo_registration_number
-                LIKE :search_registration
-        )
-        ";
-
-
-    $searchValue =
-        '%' .
-        $search .
-        '%';
-
-
-    $params[
-        ':search_name'
-    ] =
-        $searchValue;
-
-
-    $params[
-        ':search_registration'
-    ] =
-        $searchValue;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Registration year filter
-|--------------------------------------------------------------------------
-*/
-
-if ($year !== '') {
-
-    $where[] =
-        "
-        YEAR(registration_date)
-            = :registration_year
-        ";
-
-
-    $params[
-        ':registration_year'
-    ] =
-        (int) $year;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Organization type filter
-|--------------------------------------------------------------------------
-*/
-
-if ($type !== '') {
-
-    $where[] =
-        "
-        registration_type
-            = :registration_type
-        ";
-
-
-    $params[
-        ':registration_type'
-    ] =
-        $type;
-}
-
-
-$whereSql =
-    implode(
-        ' AND ',
-        $where
-    );
+/* Chosen from a fixed list, never built from what the user typed. */
+$registryOrderBy = pboRegistryOrderBy($registryFilters);
 
 
 /*
@@ -548,16 +498,14 @@ $listStatement =
             id,
             pbo_registration_number,
             pbo_name,
-            registration_date
+            registration_date,
+            registration_type
 
         FROM pbo_applications
 
         WHERE {$whereSql}
 
-        ORDER BY
-            registration_date DESC,
-            pbo_name ASC,
-            id DESC
+        ORDER BY {$registryOrderBy}
 
         LIMIT :limit
         OFFSET :offset
@@ -1377,13 +1325,30 @@ require_once __DIR__ .
 }
 
 
+/*
+| Column widths, by position. These are tied to the number of columns in
+| the table: adding the selection column at the front shifted every rule
+| along one, which left the Organization Name column with no width at all
+| and collapsed it to nothing. If a column is ever added or removed here,
+| these four rules have to move with it.
+|
+|   1  selection tick   2  registration number
+|   3  organization name (takes the slack)
+|   4  date of registration
+*/
+
 .registry-table th:first-child {
-    width: 22%;
+    width: 44px;
 }
 
 
 .registry-table th:nth-child(2) {
-    width: 58%;
+    width: 22%;
+}
+
+
+.registry-table th:nth-child(3) {
+    width: 56%;
 }
 
 
@@ -1884,6 +1849,13 @@ require_once __DIR__ .
                     action="/pbo-portal/applications/pbos.php"
                 >
 
+                    <!--
+                        Searching must not silently drop the letter and
+                        ordering the user already chose.
+                    -->
+                    <input type="hidden" name="letter" value="<?= e($letter) ?>">
+                    <input type="hidden" name="sort" value="<?= e($sort) ?>">
+
                     <div class="registry-search-grid">
 
 
@@ -2041,6 +2013,59 @@ require_once __DIR__ .
 
                 </form>
 
+
+                <!-- ==================================================
+                     ALPHABET AND ORDERING
+
+                     Both are plain links, so a filtered view can be
+                     bookmarked, shared, and handed to the export with
+                     the same query string.
+                     ================================================== -->
+
+                <div class="registry-alphabet">
+
+                    <span class="registry-alphabet-label">Name begins with</span>
+
+                    <a
+                        href="<?= e(registryUrl(['letter' => null, 'page' => null])) ?>"
+                        class="registry-letter<?= $letter === '' ? ' is-active' : '' ?>"
+                    >All</a>
+
+                    <?php foreach (range('A', 'Z') as $alphabetLetter): ?>
+                        <a
+                            href="<?= e(registryUrl([
+                                'letter' => $alphabetLetter,
+                                'page' => null,
+                            ])) ?>"
+                            class="registry-letter<?= $letter === $alphabetLetter ? ' is-active' : '' ?>"
+                        ><?= e($alphabetLetter) ?></a>
+                    <?php endforeach; ?>
+
+                    <a
+                        href="<?= e(registryUrl(['letter' => '#', 'page' => null])) ?>"
+                        class="registry-letter<?= $letter === '#' ? ' is-active' : '' ?>"
+                        title="Names beginning with a number or symbol"
+                    >#</a>
+
+                </div>
+
+
+                <div class="registry-ordering">
+
+                    <span class="registry-alphabet-label">Order</span>
+
+                    <?php foreach (pboRegistrySortOptions() as $sortKey => $sortOption): ?>
+                        <a
+                            href="<?= e(registryUrl([
+                                'sort' => $sortKey,
+                                'page' => null,
+                            ])) ?>"
+                            class="registry-letter<?= $sort === $sortKey ? ' is-active' : '' ?>"
+                        ><?= e($sortOption['label']) ?></a>
+                    <?php endforeach; ?>
+
+                </div>
+
             </div>
 
         </section>
@@ -2166,11 +2191,80 @@ require_once __DIR__ .
                 $pbos !== []
             ): ?>
 
+                <!-- ==================================================
+                     EXPORT AND PRINT
+
+                     Acts on the ticked rows, or on everything matching
+                     the current filters when nothing is ticked. The
+                     export reads the same filters this page did, so
+                     what comes out is what is on screen.
+                     ================================================== -->
+
+                <div
+                    class="registry-actions"
+                    data-registry-actions
+                    data-export-url="/pbo-portal/applications/export-registry.php"
+                    data-filter-query="<?= e(http_build_query(array_filter([
+                        'q' => $search,
+                        'year' => $year,
+                        'type' => $type,
+                        'letter' => $letter,
+                        'sort' => $sort,
+                    ], static fn ($v) => $v !== '' && $v !== null))) ?>"
+                    data-total="<?= (int) $totalRecords ?>"
+                >
+
+                    <span class="registry-actions-scope" data-scope-label>
+                        Nothing ticked &mdash; actions apply to all
+                        <?= (int) $totalRecords ?> matching
+                        organization<?= $totalRecords === 1 ? '' : 's' ?>
+                    </span>
+
+                    <span class="registry-actions-buttons">
+
+                        <button type="button" class="registry-action" data-export="list-excel">
+                            Export list to Excel
+                        </button>
+
+                        <button type="button" class="registry-action" data-export="list-print">
+                            Print list
+                        </button>
+
+                        <button type="button" class="registry-action" data-export="details-excel">
+                            Export full details
+                        </button>
+
+                        <button type="button" class="registry-action" data-export="details-print">
+                            Print full details
+                        </button>
+
+                        <button
+                            type="button"
+                            class="registry-action registry-action-quiet"
+                            data-clear-selection
+                            hidden
+                        >
+                            Clear selection
+                        </button>
+
+                    </span>
+
+                </div>
+
                 <table class="registry-table">
 
                     <thead>
 
                         <tr>
+
+                            <th class="registry-tick-cell">
+                                <input
+                                    type="checkbox"
+                                    data-select-page
+                                    title="Tick every organization on this page"
+                                    aria-label="Select all on this page"
+                                >
+                            </th>
 
                             <th>
                                 Registration Number
@@ -2227,6 +2321,18 @@ require_once __DIR__ .
                                     $pboName
                                 ) ?>"
                             >
+
+
+                                <!-- SELECTION -->
+
+                                <td class="registry-tick-cell">
+                                    <input
+                                        type="checkbox"
+                                        data-registry-tick
+                                        value="<?= (int) $pbo['id'] ?>"
+                                        aria-label="Select <?= e($pboName) ?>"
+                                    >
+                                </td>
 
 
                                 <!-- REGISTRATION NUMBER -->
@@ -2643,7 +2749,19 @@ require_once __DIR__ .
 
             row.addEventListener(
                 'click',
-                openRecord
+                function (event) {
+
+                    /*
+                    | Ticking a row for export is not a request to open
+                    | it. Without this the checkbox is unusable: the
+                    | click ticks the box and then navigates away.
+                    */
+                    if (event.target.closest('.registry-tick-cell')) {
+                        return;
+                    }
+
+                    openRecord();
+                }
             );
 
 
@@ -2713,6 +2831,10 @@ require_once __DIR__ .
 
 })();
 </script>
+
+
+<!-- Export and print the register: selection, scope and the buttons above the table. -->
+<script src="/pbo-portal/assets/js/registry-export.js" defer></script>
 
 
 <?php
