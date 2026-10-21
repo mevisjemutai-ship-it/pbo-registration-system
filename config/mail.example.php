@@ -14,6 +14,8 @@
 |   - Create an App Password at https://myaccount.google.com/apppasswords
 |   - Paste the 16-character App Password below (not your normal password).
 |
+/*
+
 
 return [
     'host'        => 'smtp.gmail.com',
