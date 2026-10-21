@@ -1451,6 +1451,13 @@ require_once __DIR__ .
 .registry-name {
     display: block;
 
+    /*
+    | The register is kept in block capitals. New records are stored that
+    | way; this also raises the ones entered before the rule existed, so
+    | the list reads consistently either way.
+    */
+    text-transform: uppercase;
+
     overflow: hidden;
 
     color:

@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/official-rules.php';
+require_once __DIR__ . '/../includes/text-case.php';
 
 requireLogin();
 requirePasswordChanged();
@@ -548,17 +549,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'designation' => $designation,
 
             'full_name' =>
-                cleanString(
+                pboStoredCase(
+                    'full_name',
                     $posted['full_name'] ?? ''
                 ),
 
             'nationality' =>
-                cleanString(
+                pboStoredCase(
+                    'nationality',
                     $posted['nationality'] ?? ''
                 ),
 
             'id_passport_number' =>
-                cleanString(
+                pboStoredCase(
+                    'id_passport_number',
                     $posted['id_passport_number'] ?? ''
                 ),
 
@@ -573,27 +577,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ),
 
             'tax_id_number' =>
-                cleanString(
+                pboStoredCase(
+                    'tax_id_number',
                     $posted['tax_id_number'] ?? ''
                 ),
 
             'phone_number' =>
-                cleanString(
+                pboStoredCase(
+                    'phone_number',
                     $posted['phone_number'] ?? ''
                 ),
 
             'email' =>
-                cleanString(
+                pboStoredCase(
+                    'email',
                     $posted['email'] ?? ''
                 ),
 
             'existing_signature' =>
-                cleanString(
+                pboStoredCase(
+                    'existing_signature',
                     $posted['existing_signature'] ?? ''
                 ),
 
             'signature' =>
-                cleanString(
+                pboStoredCase(
+                    'existing_signature',
                     $posted['existing_signature'] ?? ''
                 ),
         ];
@@ -633,17 +642,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'DIRECTOR',
 
             'full_name' =>
-                cleanString(
+                pboStoredCase(
+                    'full_name',
                     $posted['full_name'] ?? ''
                 ),
 
             'nationality' =>
-                cleanString(
+                pboStoredCase(
+                    'nationality',
                     $posted['nationality'] ?? ''
                 ),
 
             'id_passport_number' =>
-                cleanString(
+                pboStoredCase(
+                    'id_passport_number',
                     $posted['id_passport_number'] ?? ''
                 ),
 
@@ -658,27 +670,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ),
 
             'tax_id_number' =>
-                cleanString(
+                pboStoredCase(
+                    'tax_id_number',
                     $posted['tax_id_number'] ?? ''
                 ),
 
             'phone_number' =>
-                cleanString(
+                pboStoredCase(
+                    'phone_number',
                     $posted['phone_number'] ?? ''
                 ),
 
             'email' =>
-                cleanString(
+                pboStoredCase(
+                    'email',
                     $posted['email'] ?? ''
                 ),
 
             'existing_signature' =>
-                cleanString(
+                pboStoredCase(
+                    'existing_signature',
                     $posted['existing_signature'] ?? ''
                 ),
 
             'signature' =>
-                cleanString(
+                pboStoredCase(
+                    'existing_signature',
                     $posted['existing_signature'] ?? ''
                 ),
         ];

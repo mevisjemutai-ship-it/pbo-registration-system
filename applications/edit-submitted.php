@@ -5,6 +5,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/application-validation.php';
 require_once __DIR__ . '/../includes/official-rules.php';
+require_once __DIR__ . '/../includes/text-case.php';
 require_once __DIR__ . '/../includes/kenya-locations.php';
 
 requireLogin();
@@ -723,8 +724,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
      */
     foreach (array_keys($form) as $field) {
 
-        $form[$field] = trim(
-            (string) ($_POST[$field] ?? '')
+        /* Block capitals, except email - see includes/text-case.php. */
+        $form[$field] = pboStoredCase(
+            $field,
+            $_POST[$field] ?? ''
         );
     }
 
@@ -970,31 +973,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $officials[$designation] = [
 
             'full_name' =>
-                trim(
-                    (string) (
-                        $posted['full_name'] ?? ''
-                    )
+                pboStoredCase(
+                    'full_name',
+                    $posted['full_name'] ?? ''
                 ),
 
             'nationality' =>
-                trim(
-                    (string) (
-                        $posted['nationality'] ?? ''
-                    )
+                pboStoredCase(
+                    'nationality',
+                    $posted['nationality'] ?? ''
                 ),
 
             'id_passport_number' =>
-                trim(
-                    (string) (
-                        $posted['id_passport_number'] ?? ''
-                    )
+                pboStoredCase(
+                    'id_passport_number',
+                    $posted['id_passport_number'] ?? ''
                 ),
 
             'kra_pin' =>
-                trim(
-                    (string) (
-                        $posted['kra_pin'] ?? ''
-                    )
+                pboStoredCase(
+                    'kra_pin',
+                    $posted['kra_pin'] ?? ''
                 ),
 
             'tax_id_type' =>
@@ -1003,24 +1002,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ),
 
             'tax_id_number' =>
-                trim(
-                    (string) (
-                        $posted['tax_id_number'] ?? ''
-                    )
+                pboStoredCase(
+                    'tax_id_number',
+                    $posted['tax_id_number'] ?? ''
                 ),
 
             'phone_number' =>
-                trim(
-                    (string) (
-                        $posted['phone_number'] ?? ''
-                    )
+                pboStoredCase(
+                    'phone_number',
+                    $posted['phone_number'] ?? ''
                 ),
 
             'email' =>
-                trim(
-                    (string) (
-                        $posted['email'] ?? ''
-                    )
+                pboStoredCase(
+                    'email',
+                    $posted['email'] ?? ''
                 ),
         ];
     }
@@ -1048,31 +1044,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $officials['DIRECTOR'][] = [
 
             'full_name' =>
-                trim(
-                    (string) (
-                        $postedDirector['full_name'] ?? ''
-                    )
+                pboStoredCase(
+                    'full_name',
+                    $postedDirector['full_name'] ?? ''
                 ),
 
             'nationality' =>
-                trim(
-                    (string) (
-                        $postedDirector['nationality'] ?? ''
-                    )
+                pboStoredCase(
+                    'nationality',
+                    $postedDirector['nationality'] ?? ''
                 ),
 
             'id_passport_number' =>
-                trim(
-                    (string) (
-                        $postedDirector['id_passport_number'] ?? ''
-                    )
+                pboStoredCase(
+                    'id_passport_number',
+                    $postedDirector['id_passport_number'] ?? ''
                 ),
 
             'kra_pin' =>
-                trim(
-                    (string) (
-                        $postedDirector['kra_pin'] ?? ''
-                    )
+                pboStoredCase(
+                    'kra_pin',
+                    $postedDirector['kra_pin'] ?? ''
                 ),
 
             'tax_id_type' =>
@@ -1081,24 +1073,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ),
 
             'tax_id_number' =>
-                trim(
-                    (string) (
-                        $postedDirector['tax_id_number'] ?? ''
-                    )
+                pboStoredCase(
+                    'tax_id_number',
+                    $postedDirector['tax_id_number'] ?? ''
                 ),
 
             'phone_number' =>
-                trim(
-                    (string) (
-                        $postedDirector['phone_number'] ?? ''
-                    )
+                pboStoredCase(
+                    'phone_number',
+                    $postedDirector['phone_number'] ?? ''
                 ),
 
             'email' =>
-                trim(
-                    (string) (
-                        $postedDirector['email'] ?? ''
-                    )
+                pboStoredCase(
+                    'email',
+                    $postedDirector['email'] ?? ''
                 ),
         ];
     }
