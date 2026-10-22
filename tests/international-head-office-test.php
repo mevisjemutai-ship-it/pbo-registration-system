@@ -212,6 +212,10 @@ $pdo->exec("
     VALUES
         (10, 'UGANDA', 'KAMPALA', 'PLOT 14 KIRA ROAD', '+256700000000', 'ug@amani.example'),
         (12, 'FRANCE', 'LYON', '8 RUE DE LA PAIX', '+33100000000', 'fr@relief.example');
+
+    /* Named, with no office details - the ordinary case. */
+    INSERT INTO application_foreign_locations (application_id, country)
+    VALUES (13, 'TANZANIA');
 ");
 
 /*
@@ -947,41 +951,82 @@ $saveSession = static fn (int $id): array => [
 ];
 
 /*
-| Record 22 is international and based abroad, so it HAS an overseas row.
+| These checks SAVE, which changes the records they touch, so they work
+| on copies - 40 and 42 - and leave 20 and 22 intact for the page checks
+| that follow. The first version of this did not, and the later checks
+| failed looking for details this section had just deleted.
+*/
+$pdo->exec('
+    INSERT INTO pbo_applications
+        (id, application_reference, pbo_name, pbo_registration_number,
+         registration_date, registration_type, headquarters_in_kenya, status,
+         current_step, financial_year_start_month, financial_year_end_month,
+         submitted_at, created_by)
+    SELECT id + 20, \'APP-\' || (id + 20), pbo_name, pbo_registration_number,
+           registration_date, registration_type, headquarters_in_kenya,
+           \'submitted\', 6, 1, 12, \'2026-01-05 09:00:00\', 1
+    FROM pbo_applications WHERE id IN (20, 22);
+
+    INSERT INTO application_addresses
+        (application_id, county, physical_address, postal_address, postal_code,
+         phone_number, email)
+    SELECT application_id + 20, county, physical_address, postal_address,
+           postal_code, phone_number, email
+    FROM application_addresses WHERE application_id IN (20, 22);
+
+    INSERT INTO application_international_details
+        (application_id, parent_organization_name, country_of_origin,
+         registration_number, parent_physical_address, parent_postal_address,
+         parent_postal_code, parent_phone_number, parent_email,
+         contact_person_name, contact_person_phone, contact_person_email)
+    SELECT application_id + 20, parent_organization_name, country_of_origin,
+           registration_number, parent_physical_address, parent_postal_address,
+           parent_postal_code, parent_phone_number, parent_email,
+           contact_person_name, contact_person_phone, contact_person_email
+    FROM application_international_details WHERE application_id = 22;
+
+    INSERT INTO application_foreign_locations
+        (application_id, country, city, physical_address, phone_number, email)
+    SELECT application_id + 20, country, city, physical_address, phone_number, email
+    FROM application_foreign_locations WHERE application_id IN (20, 22);
+');
+
+/*
+| Record 42 is international and based abroad, so it HAS an overseas row.
 | Say the head office is in Kenya instead: the overseas row must go,
 | rather than sitting in the register as a foreign head office that no
 | longer exists.
 */
 $before = (int) $pdo->query(
-    'SELECT COUNT(*) FROM application_international_details WHERE application_id = 22'
+    'SELECT COUNT(*) FROM application_international_details WHERE application_id = 42'
 )->fetchColumn();
 
-check('record 22 starts with overseas details', $before === 1);
+check('record 42 starts with overseas details', $before === 1);
 
 render(
     'applications/edit.php',
-    ['id' => 22],
-    $saveSession(22),
-    $savePost(22, ['headquarters_in_kenya' => '1'])
+    ['id' => 42],
+    $saveSession(42),
+    $savePost(42, ['headquarters_in_kenya' => '1'])
 );
 
 $after = (int) $pdo->query(
-    'SELECT COUNT(*) FROM application_international_details WHERE application_id = 22'
+    'SELECT COUNT(*) FROM application_international_details WHERE application_id = 42'
 )->fetchColumn();
 
 check('moving the head office to Kenya removes the overseas row', $after === 0);
 
 check('and the answer is written down, not left to be guessed',
     (int) $pdo->query(
-        'SELECT headquarters_in_kenya FROM pbo_applications WHERE id = 22'
+        'SELECT headquarters_in_kenya FROM pbo_applications WHERE id = 42'
     )->fetchColumn() === 1);
 
 /* Areas of operation outside Kenya, saved from a national organization. */
 render(
     'applications/edit.php',
-    ['id' => 20],
-    $saveSession(20),
-    $savePost(20, [
+    ['id' => 40],
+    $saveSession(40),
+    $savePost(40, [
         'operates_abroad' => 'yes',
         'foreign_locations' => [
             ['country' => 'Rwanda', 'city' => 'Kigali', 'physical_address' => 'KN 4 Ave'],
@@ -992,7 +1037,7 @@ render(
 
 $saved = $pdo->query(
     'SELECT country, city FROM application_foreign_locations
-      WHERE application_id = 20 ORDER BY country'
+      WHERE application_id = 40 ORDER BY country'
 )->fetchAll(PDO::FETCH_ASSOC);
 
 check('a national organization can save a country outside Kenya',
@@ -1007,14 +1052,14 @@ check('an empty card nobody filled in is dropped, not saved as a blank row',
 /* And saying no again clears them. */
 render(
     'applications/edit.php',
-    ['id' => 20],
-    $saveSession(20),
-    $savePost(20, ['operates_abroad' => 'no'])
+    ['id' => 40],
+    $saveSession(40),
+    $savePost(40, ['operates_abroad' => 'no'])
 );
 
 check('saying no again clears the countries',
     (int) $pdo->query(
-        'SELECT COUNT(*) FROM application_foreign_locations WHERE application_id = 20'
+        'SELECT COUNT(*) FROM application_foreign_locations WHERE application_id = 40'
     )->fetchColumn() === 0);
 
 
@@ -1109,6 +1154,89 @@ check('while the type it saved is still a code the portal can read',
     (string) $pdo->query(
         'SELECT registration_type FROM pbo_applications WHERE id = 10'
     )->fetchColumn() === 'national');
+
+
+/*
+|--------------------------------------------------------------------------
+| 11. How the two new cards read
+|--------------------------------------------------------------------------
+|
+| The wording and shape Mevis asked for, pinned so a later edit cannot
+| quietly undo it.
+*/
+
+echo "11. Wording and shape\n";
+
+$pagesWithCards = [
+    'create.php' => render('applications/create.php', ['id' => 12]),
+    'edit.php' => render('applications/edit.php', ['id' => 22], $editSession(22)),
+    'edit-submitted.php' => render(
+        'applications/edit-submitted.php', ['id' => 22], $editSession(22)
+    ),
+];
+
+foreach ($pagesWithCards as $name => $page) {
+
+    /* The head office answers are places, not Yes and No. */
+    check($name . ': the head office choice reads "In Kenya"',
+        (bool) preg_match('/>\s*In Kenya\s*</', $page));
+
+    check($name . ': and "Outside Kenya"',
+        (bool) preg_match('/>\s*Outside Kenya\s*</', $page));
+
+    check($name . ': no "Yes, in Kenya"', !str_contains($page, 'Yes, in Kenya'));
+    check($name . ': no "No, outside Kenya"', !str_contains($page, 'No, outside Kenya'));
+
+    check($name . ': the question asks where, not whether',
+        str_contains($page, "Where is the organization's head office?"));
+
+    /* A country card is a country and a pair of buttons, nothing more. */
+    check($name . ': a country card offers a details toggle',
+        str_contains($page, 'data-toggle-foreign'));
+
+    check($name . ': the country field is the one on show',
+        (bool) preg_match('/data-foreign-field="country"/', $page));
+
+    check($name . ': the details start hidden on a card that has none',
+        (bool) preg_match('/(foreign-location-body|operating-location-body)[^>]*\shidden/', $page)
+            || !str_contains($page, 'data-foreign-card'));
+
+    check($name . ': the Remove button is no longer crowding a "Country 1" heading',
+        !preg_match('/<strong>\s*Country \d/', $page));
+
+    /* The classes the buttons are laid out with have to exist. */
+    check($name . ': the card row has styling of its own',
+        str_contains($page, '.foreign-location-actions'));
+}
+
+/*
+| A saved card that HAS details opens rather than hiding them, so a
+| record's own information is never behind a button the reader has to
+| know to press. Record 22's country is FRANCE with a city of LYON.
+*/
+$withDetails = $pagesWithCards['edit.php'];
+
+check('a card whose details are filled in starts open',
+    (bool) preg_match('/aria-expanded="true"/', $withDetails));
+
+check('and its details are rendered, not left out',
+    str_contains($withDetails, 'LYON'));
+
+/*
+| And the ordinary case - a country named with nothing else - stays
+| closed, which is the whole point of the change: naming the country is
+| the requirement, the office details are not.
+*/
+$bareCountry = render('applications/create.php', ['id' => 13]);
+
+check('a card with only a country is rendered closed',
+    (bool) preg_match('/operating-location-body"?\s*\n?\s*hidden/', $bareCountry));
+
+check('and its toggle says so',
+    str_contains($bareCountry, 'aria-expanded="false"'));
+
+check('the country itself is still on show',
+    str_contains($bareCountry, 'TANZANIA'));
 
 
 /*

@@ -2893,6 +2893,70 @@ require_once __DIR__ . '/../includes/header.php';
     font-size: 13px;
 }
 
+/*
+| An area of operation outside Kenya: the country on the left, the
+| buttons on the right, and room between them. The first version of this
+| card used a class with no CSS at all, so the Remove button sat against
+| the heading.
+*/
+.foreign-location-heading {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+}
+
+.foreign-location-country {
+    flex: 1 1 260px;
+    min-width: 220px;
+}
+
+.foreign-location-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding-bottom: 2px;
+}
+
+.foreign-location-status {
+    font-size: 13px;
+    color: var(--ed-muted, #6b7785);
+    white-space: nowrap;
+}
+
+.foreign-location-status.has-details {
+    color: var(--ed-ink);
+    font-weight: 600;
+}
+
+/* Closed by default, so a card is just a country until asked. */
+.foreign-location-body {
+    margin-top: 12px;
+}
+
+/*
+| The hidden attribute only means display:none by way of the browser's
+| own stylesheet, and this element also carries Bootstrap's .row, whose
+| display:flex is an author rule and therefore wins. Without this the
+| card looked closed to the script and open to the person reading it -
+| all eight fields on show. Caught by driving the page in a browser;
+| checking the markup alone would never have found it.
+*/
+.foreign-location-body[hidden] {
+    display: none !important;
+}
+
+@media (max-width: 620px) {
+
+    .foreign-location-actions {
+        width: 100%;
+        justify-content: flex-start;
+    }
+}
+
 .operating-location-note {
     margin-top: 10px;
     color: var(--ed-muted);
@@ -3418,7 +3482,7 @@ require_once __DIR__ . '/../includes/header.php';
                     </h2>
 
                     <p>
-                        Is the organization's head office in Kenya?
+                        Where is the organization's head office?
                     </p>
 
                 </div>
@@ -3430,7 +3494,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <div
                     class="row g-3"
                     role="radiogroup"
-                    aria-label="Is the head office in Kenya?"
+                    aria-label="Where is the head office?"
                 >
 
                     <div class="col-md-6">
@@ -3446,7 +3510,7 @@ require_once __DIR__ . '/../includes/header.php';
                                     : '' ?>
                             >
 
-                            Yes, in Kenya
+                            In Kenya
 
                         </label>
 
@@ -3465,7 +3529,7 @@ require_once __DIR__ . '/../includes/header.php';
                                     : '' ?>
                             >
 
-                            No, outside Kenya
+                            Outside Kenya
 
                         </label>
 
@@ -3476,8 +3540,8 @@ require_once __DIR__ . '/../includes/header.php';
                         <p class="text-muted" style="margin: 0; font-size: 12px;">
                             Many organizations registered as international
                             have their head office here and no body abroad.
-                            If that is the case, answer Yes and fill in the
-                            Kenyan address as usual.
+                            If that is the case, choose In Kenya and fill in
+                            the Kenyan address as usual.
                         </p>
 
                     </div>
@@ -4039,42 +4103,88 @@ require_once __DIR__ . '/../includes/header.php';
                             $foreignLocationsForForm as $index => $location
                         ): ?>
 
+                            <?php
+                            /*
+                             * Naming the country is the whole requirement.
+                             * The office details are optional and stay out
+                             * of the way until somebody has them, the same
+                             * as a county's - so the card starts open only
+                             * when the record already holds some.
+                             */
+                            $foreignDetailFields = pboForeignLocationFields();
+                            unset($foreignDetailFields['country']);
+
+                            $hasForeignDetails = false;
+
+                            foreach (array_keys($foreignDetailFields) as $detailField) {
+                                if (trim((string) ($location[$detailField] ?? '')) !== '') {
+                                    $hasForeignDetails = true;
+                                    break;
+                                }
+                            }
+                            ?>
+
                             <div
                                 class="operating-location-card"
                                 data-foreign-card
                             >
 
-                                <div class="operating-location-head">
+                                <div class="foreign-location-heading">
 
-                                    <strong>Country <?= (int) $index + 1 ?></strong>
+                                    <div class="foreign-location-country">
 
-                                    <button
-                                        type="button"
-                                        class="btn btn-sm btn-outline-secondary"
-                                        data-remove-foreign
-                                    >
-                                        Remove
-                                    </button>
+                                        <label class="edit-label">
+                                            Country
+                                            <span class="text-danger">*</span>
+                                        </label>
+
+                                        <input
+                                            class="form-control"
+                                            type="text"
+                                            name="foreign_locations[<?= (int) $index ?>][country]"
+                                            data-foreign-field="country"
+                                            value="<?= e((string) ($location['country'] ?? '')) ?>"
+                                            list="country-list"
+                                        >
+
+                                    </div>
+
+                                    <div class="foreign-location-actions">
+
+                                        <span class="foreign-location-status"></span>
+
+                                        <button
+                                            type="button"
+                                            class="btn btn-sm btn-outline-secondary operating-location-remove"
+                                            data-toggle-foreign
+                                            aria-expanded="<?= $hasForeignDetails ? 'true' : 'false' ?>"
+                                        ></button>
+
+                                        <button
+                                            type="button"
+                                            class="btn btn-sm btn-outline-secondary operating-location-remove"
+                                            data-remove-foreign
+                                        >
+                                            Remove
+                                        </button>
+
+                                    </div>
 
                                 </div>
 
-                                <div class="row g-3">
+                                <div
+                                    class="row g-3 foreign-location-body"
+                                    <?= $hasForeignDetails ? '' : 'hidden' ?>
+                                >
 
                                     <?php foreach (
-                                        pboForeignLocationFields()
-                                        as $field => $label
+                                        $foreignDetailFields as $field => $label
                                     ): ?>
 
                                         <div class="col-md-6">
 
                                             <label class="edit-label">
-
                                                 <?= e($label) ?>
-
-                                                <?php if ($field === 'country'): ?>
-                                                    <span class="text-danger">*</span>
-                                                <?php endif; ?>
-
                                             </label>
 
                                             <input
@@ -4085,9 +4195,6 @@ require_once __DIR__ . '/../includes/header.php';
                                                 name="foreign_locations[<?= (int) $index ?>][<?= e($field) ?>]"
                                                 data-foreign-field="<?= e($field) ?>"
                                                 value="<?= e((string) ($location[$field] ?? '')) ?>"
-                                                <?= $field === 'country'
-                                                    ? 'list="country-list"'
-                                                    : '' ?>
                                             >
 
                                         </div>
@@ -4817,6 +4924,45 @@ require_once __DIR__ . '/../includes/header.php';
         JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP
     ) ?>;
 
+    /*
+    | Each card shows its country and nothing else until the person asks
+    | for the office details. The status line says which it is, so a
+    | closed card does not look like an unfinished one.
+    */
+
+    function foreignCardHasDetails(card) {
+
+        return Array.from(
+            card.querySelectorAll('.foreign-location-body input')
+        ).some(function (field) {
+            return field.value.trim() !== '';
+        });
+    }
+
+    function updateForeignCardStatus(card) {
+
+        const status = card.querySelector('.foreign-location-status');
+        const toggle = card.querySelector('[data-toggle-foreign]');
+        const body = card.querySelector('.foreign-location-body');
+
+        const hasDetails = foreignCardHasDetails(card);
+        const isOpen = Boolean(body) && !body.hidden;
+
+        if (status) {
+            status.textContent = hasDetails
+                ? 'Office details added'
+                : 'No office details (optional)';
+            status.classList.toggle('has-details', hasDetails);
+        }
+
+        if (toggle) {
+            toggle.textContent = isOpen
+                ? 'Hide details'
+                : (hasDetails ? 'View / edit office details' : 'Add office details');
+            toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        }
+    }
+
     function renumberForeignCards() {
 
         if (!foreignCards) {
@@ -4827,12 +4973,6 @@ require_once __DIR__ . '/../includes/header.php';
             foreignCards.children,
             function (card, index) {
 
-                const heading = card.querySelector('strong');
-
-                if (heading) {
-                    heading.textContent = 'Country ' + (index + 1);
-                }
-
                 card.querySelectorAll('input').forEach(function (field) {
 
                     const key = field.getAttribute('data-foreign-field');
@@ -4842,6 +4982,8 @@ require_once __DIR__ . '/../includes/header.php';
                             'foreign_locations[' + index + '][' + key + ']';
                     }
                 });
+
+                updateForeignCardStatus(card);
             }
         );
     }
@@ -4857,30 +4999,48 @@ require_once __DIR__ . '/../includes/header.php';
         card.setAttribute('data-foreign-card', '');
 
         let html =
-            '<div class="operating-location-head">'
-            + '<strong>Country</strong>'
-            + '<button type="button" class="btn btn-sm btn-outline-secondary" '
+            '<div class="foreign-location-heading">'
+            + '<div class="foreign-location-country">'
+            + '<label class="edit-label">Country '
+            + '<span class="text-danger">*</span></label>'
+            + '<input class="form-control" type="text" list="country-list" '
+            + 'data-foreign-field="country">'
+            + '</div>'
+            + '<div class="foreign-location-actions">'
+            + '<span class="foreign-location-status"></span>'
+            + '<button type="button" '
+            + 'class="btn btn-sm btn-outline-secondary operating-location-remove" '
+            + 'data-toggle-foreign aria-expanded="false"></button>'
+            + '<button type="button" '
+            + 'class="btn btn-sm btn-outline-secondary operating-location-remove" '
             + 'data-remove-foreign>Remove</button>'
-            + '</div><div class="row g-3">';
+            + '</div></div>'
+            + '<div class="row g-3 foreign-location-body" hidden>';
 
         Object.keys(foreignFields).forEach(function (key) {
+
+            if (key === 'country') {
+                return;
+            }
+
             html +=
                 '<div class="col-md-6"><label class="edit-label">'
                 + foreignFields[key]
-                + (key === 'country'
-                    ? ' <span class="text-danger">*</span>'
-                    : '')
                 + '</label><input class="form-control" type="'
                 + (key === 'email' ? 'email' : 'text')
-                + '" data-foreign-field="' + key + '"'
-                + (key === 'country' ? ' list="country-list"' : '')
-                + '></div>';
+                + '" data-foreign-field="' + key + '"></div>';
         });
 
         card.innerHTML = html + '</div>';
 
         foreignCards.appendChild(card);
         renumberForeignCards();
+
+        const country = card.querySelector('[data-foreign-field="country"]');
+
+        if (country) {
+            country.focus();
+        }
     }
 
     function updateForeignVisibility() {
@@ -4907,6 +5067,22 @@ require_once __DIR__ . '/../includes/header.php';
 
     document.addEventListener('click', function (event) {
 
+        const toggle = event.target.closest('[data-toggle-foreign]');
+
+        if (toggle) {
+
+            const openCard = toggle.closest('[data-foreign-card]');
+            const body = openCard
+                && openCard.querySelector('.foreign-location-body');
+
+            if (body) {
+                body.hidden = !body.hidden;
+                updateForeignCardStatus(openCard);
+            }
+
+            return;
+        }
+
         if (!event.target.closest('[data-remove-foreign]')) {
             return;
         }
@@ -4919,12 +5095,29 @@ require_once __DIR__ . '/../includes/header.php';
         }
     });
 
+    /* Typing a detail in changes what the status line should say. */
+    if (foreignCards) {
+        foreignCards.addEventListener('input', function (event) {
+
+            const card = event.target.closest('[data-foreign-card]');
+
+            if (card) {
+                updateForeignCardStatus(card);
+            }
+        });
+    }
+
     document
         .querySelectorAll('input[name="operates_abroad"]')
         .forEach(function (radio) {
             radio.addEventListener('change', updateForeignVisibility);
         });
 
+    /*
+    | The cards the server rendered need their status line and toggle
+    | wording filled in; without this a saved card starts blank.
+    */
+    renumberForeignCards();
     updateForeignVisibility();
 
 
