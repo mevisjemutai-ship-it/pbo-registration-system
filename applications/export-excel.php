@@ -6,6 +6,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/official-rules.php';
 require_once __DIR__ . '/../includes/excel-layout.php';
+require_once __DIR__ . '/../includes/organization-reach.php';
 require_once __DIR__ . '/../includes/application-labels.php';
 
 requireLogin();
@@ -134,6 +135,7 @@ $stmt = $pdo->prepare(
         pbo_registration_number,
         registration_date,
         registration_type,
+        " . (pboHeadquartersColumnAvailable($pdo) ? 'headquarters_in_kenya,' : '') . "
         status,
         financial_year_start_month,
         financial_year_end_month,
@@ -242,17 +244,7 @@ $operatingLocations = $stmt->fetchAll(PDO::FETCH_ASSOC);
 $stmt = $pdo->prepare(
     "
     SELECT
-        parent_organization_name,
-        country_of_origin,
-        registration_number,
-        parent_physical_address,
-        parent_postal_address,
-        parent_postal_code,
-        parent_phone_number,
-        parent_email,
-        contact_person_name,
-        contact_person_phone,
-        contact_person_email
+        " . implode(",\n        ", array_keys(pboOverseasFields())) . "
     FROM application_international_details
     WHERE application_id = :application_id
     LIMIT 1
@@ -613,25 +605,53 @@ if (officialTaxColumnsExist($pdo)) {
 
 $isInternational = strtolower((string) $application['registration_type']) === 'international';
 
-$internationalFields = [];
+/*
+| One head office, one section. An organization whose head office is in
+| Kenya prints the Kenyan address and nothing overseas, however it is
+| registered - printing both is what made a Kenyan organization look
+| like its own foreign parent on an exported record.
+*/
+$headOfficeAbroad = pboUsesOverseasHeadOffice($application);
 
-if ($isInternational && is_array($internationalDetails)) {
-    $internationalFields = array_filter([
-        'Parent Organization' => $internationalDetails['parent_organization_name'] ?? '',
-        'Country of Origin' => $internationalDetails['country_of_origin'] ?? '',
-        'Registration Number' => $internationalDetails['registration_number'] ?? '',
-        'Physical Address' => $internationalDetails['parent_physical_address'] ?? '',
-        'Postal Address' => implode(' - ', array_filter([
-            trim((string) ($internationalDetails['parent_postal_address'] ?? '')),
-            trim((string) ($internationalDetails['parent_postal_code'] ?? '')),
-        ], 'xlFilled')),
-        'Telephone' => $internationalDetails['parent_phone_number'] ?? '',
-        'Email' => $internationalDetails['parent_email'] ?? '',
-        'Contact Person' => $internationalDetails['contact_person_name'] ?? '',
-        'Contact Telephone' => $internationalDetails['contact_person_phone'] ?? '',
-        'Contact Email' => $internationalDetails['contact_person_email'] ?? '',
-    ], 'xlFilled');
+$overseasFields = [];
+
+if ($headOfficeAbroad && is_array($internationalDetails)) {
+
+    /*
+    | Labels from pboOverseasFields(), so a rename reaches this export,
+    | the other export, the form and the record together. Postal address
+    | and postal code are the one departure: they are printed as one
+    | field here because two half-empty cells side by side read worse
+    | than one.
+    */
+    $labels = pboOverseasFields();
+
+    foreach ($labels as $column => $label) {
+
+        if ($column === 'parent_postal_code') {
+            continue;
+        }
+
+        $value = $internationalDetails[$column] ?? '';
+
+        if ($column === 'parent_postal_address') {
+            $value = implode(' - ', array_filter([
+                trim((string) ($internationalDetails['parent_postal_address'] ?? '')),
+                trim((string) ($internationalDetails['parent_postal_code'] ?? '')),
+            ], 'xlFilled'));
+        }
+
+        $overseasFields[$label] = $value;
+    }
+
+    $overseasFields = array_filter($overseasFields, 'xlFilled');
 }
+
+/* Areas of operation outside Kenya, for either type of organization. */
+$foreignLocations = array_values(array_filter(
+    pboForeignLocations($pdo, $applicationId),
+    static fn ($row) => xlFilled($row['country'] ?? '')
+));
 
 /* A location with nothing but a county name is still worth a row. */
 $operatingLocations = array_values(array_filter(
@@ -782,12 +802,16 @@ $headOffice = xlFields([
 ], 2);
 ?>
 
-<?= xlSub('Head Office') ?>
+<?php if (!$headOfficeAbroad): ?>
 
-<?php if ($headOffice !== ''): ?>
-    <?= $headOffice ?>
-<?php else: ?>
-    <tr><td colspan="<?= XL_GRID ?>" class="v plain">No head office address recorded.</td></tr>
+    <?= xlSub('Head Office') ?>
+
+    <?php if ($headOffice !== ''): ?>
+        <?= $headOffice ?>
+    <?php else: ?>
+        <tr><td colspan="<?= XL_GRID ?>" class="v plain">No head office address recorded.</td></tr>
+    <?php endif; ?>
+
 <?php endif; ?>
 
 <?php if ($operatingLocations !== []): ?>
@@ -817,16 +841,54 @@ $headOffice = xlFields([
 
 <?php endif; ?>
 
+<?php
+/*
+| Areas of operation outside Kenya. Same table shape as the counties
+| above, with country in place of county and city in place of
+| sub-county, so one reading explains both.
+*/
+?>
+<?php if ($foreignLocations !== []): ?>
+
+    <?= xlSub(
+        'Areas of Operation Outside Kenya',
+        count($foreignLocations) . (count($foreignLocations) === 1 ? ' country' : ' countries')
+    ) ?>
+
+    <tr>
+        <?= xlHeading('Country', 2, 'left') ?>
+        <?= xlHeading('City / Town', 2, 'left') ?>
+        <?= xlHeading('Physical Address', 4, 'left') ?>
+        <?= xlHeading('Telephone', 2) ?>
+        <?= xlHeading('Email', 2, 'left') ?>
+    </tr>
+
+    <?php foreach ($foreignLocations as $location): ?>
+        <tr>
+            <?= xlCell($location['country'], 2) ?>
+            <?= xlCell($location['city'], 2, 'v plain') ?>
+            <?= xlCell($location['physical_address'], 4, 'v plain') ?>
+            <?= xlCell($location['phone_number'], 2, 'v plain c') ?>
+            <?= xlCell($location['email'], 2, 'v plain') ?>
+        </tr>
+    <?php endforeach; ?>
+
+<?php endif; ?>
+
 </table>
 
-<?php if ($internationalFields !== []): ?>
+<?php if ($overseasFields !== []): ?>
 
     <?= xlGap() ?>
-    <?= xlBand(nextSection(), 'Parent Organization', 'Recorded for an international organization') ?>
+    <?= xlBand(
+        nextSection(),
+        'Head Office Outside Kenya',
+        "The organization's own head office in the country it is based in"
+    ) ?>
 
     <table>
     <?= xlGrid() ?>
-    <?= xlFields($internationalFields, 2) ?>
+    <?= xlFields($overseasFields, 2) ?>
     </table>
 
 <?php endif; ?>

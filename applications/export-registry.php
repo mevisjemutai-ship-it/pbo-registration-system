@@ -34,6 +34,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/excel-layout.php';
+require_once __DIR__ . '/../includes/organization-reach.php';
 require_once __DIR__ . '/../includes/official-rules.php';
 require_once __DIR__ . '/../includes/pbo-registry-filters.php';
 require_once __DIR__ . '/../includes/application-labels.php';
@@ -160,7 +161,8 @@ if ($ids !== []) {
 
 $statement = $connection->prepare(
     'SELECT id, application_reference, pbo_name, pbo_registration_number,
-            registration_date, registration_type,
+            registration_date, registration_type,'
+            . (pboHeadquartersColumnAvailable($connection) ? ' headquarters_in_kenya,' : '') . '
             financial_year_start_month, financial_year_end_month,
             submitted_at
        FROM pbo_applications
@@ -190,6 +192,8 @@ $truncated = $mode === 'details' && count($records) === MAX_DETAIL_RECORDS;
 
 $addresses = [];
 $locations = [];
+$foreignLocations = [];
+$overseasOffices = [];
 $objectives = [];
 $beneficiaries = [];
 $officials = [];
@@ -217,6 +221,35 @@ if ($mode === 'details' && $records !== []) {
         )->fetchAll(PDO::FETCH_ASSOC) as $row
     ) {
         $locations[$row['application_id']][] = $row;
+    }
+
+    /*
+    | Areas of operation outside Kenya, and the overseas head office for
+    | the records that have one. Both guarded, so an export still runs on
+    | a server where database/add_operations_outside_kenya.sql has not
+    | been applied yet - it simply prints nothing for them.
+    */
+    if (pboForeignLocationsAvailable($connection)) {
+        foreach (
+            $connection->query(
+                'SELECT * FROM application_foreign_locations
+                  WHERE application_id IN (' . $idList . ')
+               ORDER BY country'
+            )->fetchAll(PDO::FETCH_ASSOC) as $row
+        ) {
+            $foreignLocations[$row['application_id']][] = $row;
+        }
+    }
+
+    foreach (
+        $connection->query(
+            'SELECT * FROM application_international_details
+              WHERE application_id IN (' . $idList . ')
+           ORDER BY id DESC'
+        )->fetchAll(PDO::FETCH_ASSOC) as $row
+    ) {
+        /* Latest row per application wins, as with the addresses. */
+        $overseasOffices[$row['application_id']] ??= $row;
     }
 
     foreach (
@@ -453,11 +486,53 @@ if ($format === 'excel') {
             ], 2);
             ?>
 
-            <?php if ($headOffice !== ''): ?>
+            <?php
+            /*
+            | One head office, one table. Where it is decides which one
+            | is printed: an organization registered as international but
+            | based in Kenya gets the Kenyan table and nothing overseas,
+            | and one based abroad gets the overseas table in its place.
+            | Printing both is what made a Kenyan organization read as
+            | its own foreign parent.
+            */
+            $abroad = pboUsesOverseasHeadOffice($record);
+            $overseas = $overseasOffices[$id] ?? null;
+
+            $overseasOffice = '';
+
+            if ($abroad && is_array($overseas)) {
+                $overseasValues = [];
+
+                foreach (pboOverseasFields() as $column => $label) {
+                    if ($column === 'parent_postal_code') {
+                        continue;
+                    }
+
+                    $overseasValues[$label] = $column === 'parent_postal_address'
+                        ? implode(' - ', array_filter([
+                            trim((string) ($overseas['parent_postal_address'] ?? '')),
+                            trim((string) ($overseas['parent_postal_code'] ?? '')),
+                        ], 'xlFilled'))
+                        : ($overseas[$column] ?? '');
+                }
+
+                $overseasOffice = xlFields($overseasValues, 2);
+            }
+            ?>
+
+            <?php if (!$abroad && $headOffice !== ''): ?>
                 <table>
                 <?= xlGrid() ?>
                 <?= xlSub('Head Office') ?>
                 <?= $headOffice ?>
+                </table>
+            <?php endif; ?>
+
+            <?php if ($overseasOffice !== ''): ?>
+                <table>
+                <?= xlGrid() ?>
+                <?= xlSub('Head Office Outside Kenya') ?>
+                <?= $overseasOffice ?>
                 </table>
             <?php endif; ?>
 
@@ -478,6 +553,31 @@ if ($format === 'excel') {
                     <tr>
                         <?= xlCell($location['county'], 3) ?>
                         <?= xlCell($location['sub_county'], 2, 'v plain') ?>
+                        <?= xlCell($location['physical_address'], 4, 'v plain') ?>
+                        <?= xlCell($location['phone_number'], 3, 'v plain c') ?>
+                    </tr>
+                <?php endforeach; ?>
+                </table>
+            <?php endif; ?>
+
+            <?php if (!empty($foreignLocations[$id])): ?>
+                <table>
+                <?= xlGrid() ?>
+                <?= xlSub(
+                    'Areas of Operation Outside Kenya',
+                    count($foreignLocations[$id])
+                    . (count($foreignLocations[$id]) === 1 ? ' country' : ' countries')
+                ) ?>
+                <tr>
+                    <?= xlHeading('Country', 3, 'left') ?>
+                    <?= xlHeading('City / Town', 2, 'left') ?>
+                    <?= xlHeading('Physical Address', 4, 'left') ?>
+                    <?= xlHeading('Telephone', 3) ?>
+                </tr>
+                <?php foreach ($foreignLocations[$id] as $location): ?>
+                    <tr>
+                        <?= xlCell($location['country'], 3) ?>
+                        <?= xlCell($location['city'], 2, 'v plain') ?>
                         <?= xlCell($location['physical_address'], 4, 'v plain') ?>
                         <?= xlCell($location['phone_number'], 3, 'v plain c') ?>
                     </tr>

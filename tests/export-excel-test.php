@@ -13,7 +13,7 @@ declare(strict_types=1);
 |
 |   1. a complete one, to check every section appears and the grid holds;
 |   2. a sparse one - no second county, no email anywhere, no directors,
-|      no parent organization - to check that none of it is printed as
+|      nothing outside Kenya - to check that none of it is printed as
 |      dashes or as empty headings.
 |
 | The second case is the point. The export used to print a dash for every
@@ -53,6 +53,7 @@ $pdo->exec('
     CREATE TABLE pbo_applications (
         id INTEGER PRIMARY KEY, application_reference TEXT, pbo_name TEXT,
         pbo_registration_number TEXT, registration_date TEXT, registration_type TEXT,
+        headquarters_in_kenya INTEGER,
         status TEXT, financial_year_start_month INTEGER, financial_year_end_month INTEGER,
         submitted_at TEXT
     );
@@ -65,6 +66,11 @@ $pdo->exec('
         id INTEGER PRIMARY KEY, application_id INTEGER, county TEXT, sub_county TEXT,
         physical_address TEXT, phone_number TEXT, alternative_phone_number TEXT,
         email TEXT, postal_address TEXT, postal_code TEXT
+    );
+    CREATE TABLE application_foreign_locations (
+        id INTEGER PRIMARY KEY, application_id INTEGER, country TEXT, city TEXT,
+        physical_address TEXT, postal_address TEXT, postal_code TEXT,
+        phone_number TEXT, alternative_phone_number TEXT, email TEXT
     );
     CREATE TABLE application_international_details (
         id INTEGER PRIMARY KEY, application_id INTEGER, parent_organization_name TEXT,
@@ -90,7 +96,12 @@ $pdo->exec('
 $pdo->exec("
     INSERT INTO pbo_applications VALUES
         (1, 'PBORA/2024/0001', 'Amani Children Trust', 'PBO/2019/0041',
-         '2019-03-14', 'international', 'submitted', 1, 12, '2024-02-01 09:00:00');
+         '2019-03-14', 'international', 0, 'submitted', 1, 12, '2024-02-01 09:00:00');
+
+    INSERT INTO application_foreign_locations
+        (application_id, country, city, physical_address, phone_number, email)
+    VALUES (1, 'Uganda', 'Kampala', 'Plot 14 Kira Road', '+256 700 000 000',
+            'uganda@amani.example');
 
     INSERT INTO application_addresses
         (application_id, county, town, sub_county, physical_address, phone_number,
@@ -140,7 +151,7 @@ $pdo->exec("
 $pdo->exec("
     INSERT INTO pbo_applications VALUES
         (2, 'PBORA/2024/0002', 'Sparse Community Group', 'PBO/2022/0500',
-         '2022-08-08', 'national', 'submitted', NULL, NULL, '2024-03-01 09:00:00');
+         '2022-08-08', 'national', 1, 'submitted', NULL, NULL, '2024-03-01 09:00:00');
 
     INSERT INTO application_addresses
         (application_id, county, town, sub_county, physical_address, phone_number,
@@ -237,7 +248,11 @@ check('no em dashes anywhere in the sparse record', !has($sparse, '&mdash;') && 
 check('no em dashes anywhere in the complete record', !has($full, '&mdash;') && !has($full, '—'));
 
 check('sparse record omits the Other Areas section', !has($sparse, 'Other Areas of Operation'));
-check('sparse record omits the Parent Organization section', !has($sparse, 'Parent Organization'));
+check('sparse record omits the overseas head office section',
+    !has($sparse, 'Head Office Outside Kenya'));
+check('sparse record omits the areas outside Kenya section',
+    !has($sparse, 'Areas of Operation Outside Kenya'));
+check('sparse record still prints its Kenyan head office', has($sparse, '>Head Office<'));
 check('sparse record omits Financial Year', !has($sparse, 'Financial Year Runs'));
 check('sparse record omits Beneficiaries', !has($sparse, 'Beneficiaries'));
 check('sparse record omits Public Benefit Purposes', !has($sparse, 'Public Benefit Purposes'));
@@ -253,7 +268,14 @@ check('sparse: the three officials', has($sparse, 'Halima Noor')
     && has($sparse, 'Abdi Hassan') && has($sparse, 'Fatuma Ali'));
 
 check('full: both operating counties', has($full, 'Kiambu') && has($full, 'Kisumu'));
-check('full: parent organization', has($full, 'Amani International'));
+check('full: the overseas head office section', has($full, 'Head Office Outside Kenya'));
+check('full: the overseas organization name', has($full, 'Amani International'));
+check('full: and NOT a Kenyan head office as well - one office, one section',
+    !has($full, '>Head Office<'));
+check('full: its area of operation outside Kenya', has($full, 'Kampala'));
+check('full: nothing printed says "Parent"', !preg_match('/\\bParent/i', $full));
+check('full: nothing printed says "Country of Origin"',
+    !has($full, 'Country of Origin'));
 check('full: objectives as chips', has($full, 'Education') && has($full, 'Health'));
 check('full: other objective text', has($full, 'Vocational training'));
 check('full: other beneficiary specify', has($full, 'Caregivers'));

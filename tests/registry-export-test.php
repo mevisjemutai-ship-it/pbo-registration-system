@@ -66,6 +66,7 @@ $pdo->exec('
         pbo_registration_number TEXT,
         registration_date TEXT,
         registration_type TEXT,
+        headquarters_in_kenya INTEGER,
         status TEXT,
         current_step INTEGER,
         financial_year_start_month INTEGER,
@@ -80,6 +81,18 @@ $pdo->exec('
     );
     CREATE TABLE application_operating_locations (
         id INTEGER PRIMARY KEY, application_id INTEGER, county TEXT, sub_county TEXT,
+        physical_address TEXT, postal_address TEXT, postal_code TEXT,
+        phone_number TEXT, alternative_phone_number TEXT, email TEXT
+    );
+    CREATE TABLE application_international_details (
+        id INTEGER PRIMARY KEY, application_id INTEGER,
+        parent_organization_name TEXT, country_of_origin TEXT, registration_number TEXT,
+        parent_physical_address TEXT, parent_postal_address TEXT, parent_postal_code TEXT,
+        parent_phone_number TEXT, parent_email TEXT,
+        contact_person_name TEXT, contact_person_phone TEXT, contact_person_email TEXT
+    );
+    CREATE TABLE application_foreign_locations (
+        id INTEGER PRIMARY KEY, application_id INTEGER, country TEXT, city TEXT,
         physical_address TEXT, postal_address TEXT, postal_code TEXT,
         phone_number TEXT, alternative_phone_number TEXT, email TEXT
     );
@@ -123,6 +136,25 @@ $insert->execute([
     99, 'APP-99', 'Draft Organization That Must Not Appear',
     'PBO/2026/9999', '2026-01-01', 'national', 'draft', '2026-01-01 09:00:00',
 ]);
+
+$pdo->exec("UPDATE pbo_applications SET headquarters_in_kenya = 0 WHERE id = 3");
+
+$pdo->exec("
+    INSERT INTO application_international_details
+        (application_id, parent_organization_name, country_of_origin,
+         registration_number, parent_physical_address, parent_postal_address,
+         parent_postal_code, parent_phone_number, parent_email,
+         contact_person_name, contact_person_phone, contact_person_email)
+    VALUES (3, 'Cross-Border Relief Network', 'Canada', 'CA-998877',
+            '120 Bay Street', 'PO Box 44', 'M5J 2T3', '+1 416 555 0000',
+            'head@relief.example', 'Louise Tremblay', '+1 416 555 1111',
+            'louise@relief.example');
+
+    INSERT INTO application_foreign_locations
+        (application_id, country, city, physical_address, phone_number, email)
+    VALUES (1, 'Uganda', 'Kampala', 'Plot 14 Kira Road', '+256 700 000 000',
+            'uganda@amani.example');
+");
 
 $pdo->exec("
     INSERT INTO application_addresses
@@ -244,6 +276,7 @@ $cases = [
     'list, selected ids'        => ['mode' => 'list', 'format' => 'print', 'ids' => '1,3'],
     'details, one record'       => ['mode' => 'details', 'format' => 'print', 'ids' => '1'],
     'details, excel'            => ['mode' => 'details', 'format' => 'excel', 'ids' => '1'],
+    'details, head office abroad' => ['mode' => 'details', 'format' => 'print', 'ids' => '3'],
     'list, nonsense filters'    => ['mode' => 'list', 'format' => 'print', 'sort' => "x'; DROP TABLE pbo_applications; --", 'letter' => 'ZZZ', 'year' => 'abcd', 'ids' => 'nope,-4'],
 ];
 
@@ -314,6 +347,27 @@ check('details: officials in order Chairperson, Secretary, Treasurer',
 check('details: Kenyan official shows a KRA PIN', has($details, 'A001234567X'));
 check('details: foreign number is labelled as a Tax ID, not a KRA PIN',
     has($details, 'Tax ID (SSN)') && has($details, '123-45-6789'));
+
+/* Areas of operation outside Kenya, for a national organization. */
+check('details: a national organization\'s area outside Kenya is printed',
+    has($details, 'Areas of Operation Outside Kenya') && has($details, 'Kampala'));
+
+/*
+| And the record whose head office is abroad: the overseas table in
+| place of the Kenyan one, never both, and nothing calling it a parent.
+*/
+$abroadDetails = $outputs['details, head office abroad'];
+
+check('details, abroad: the overseas head office table is printed',
+    has($abroadDetails, 'Head Office Outside Kenya'));
+check('details, abroad: its country is printed',
+    has($abroadDetails, 'Canada'));
+check('details, abroad: no Kenyan head office table as well',
+    !has($abroadDetails, '>Head Office<'));
+check('details, abroad: nothing printed says "Parent"',
+    !preg_match('/\\bParent/i', $abroadDetails));
+check('details, abroad: nothing printed says "Country of Origin"',
+    !has($abroadDetails, 'Country of Origin'));
 
 $nonsense = $outputs['list, nonsense filters'];
 check('bad sort falls back rather than injecting',
