@@ -9,11 +9,23 @@ config/database.php
 uploads/*
 !uploads/.gitkeep
 # Database dumps
+#
+# These contain real data - the users table with password hashes, and
+# applicants' names, ID numbers and KRA PINs. Four of them were committed
+# and sat in the web root where anyone could download them, so the rule
+# now covers plain .sql as well. Keep dumps OUTSIDE the portal folder.
+#
+# The migrations under database/ are allowed through below: they are
+# instructions, not data.
+*.sql
 *.sql.gz
 *.dump
-# Allow clean deployment schema
+pbo_portal_before_*.sql
+# Allow the migrations and the clean deployment schema
 !database/
-!database/schema.sql
+!database/*.sql
+# ...but never a dump that happens to live there
+database/pbo_portal_before_*.sql
 # Logs and runtime files
 *.log
 logs/

@@ -1,0 +1,86 @@
+# ---------------------------------------------------------------------------
+# What the web server must NOT hand out
+# ---------------------------------------------------------------------------
+#
+# The portal is served straight out of its own folder, so every file in it
+# is reachable over HTTP unless something says otherwise. Nothing did, and
+# the folder holds rather more than the pages:
+#
+#   pbo_portal_before_commit.sql and the dumps under database/ are full
+#   database dumps. They contain the users table - usernames and password
+#   hashes - and real applicant records: organizations, officials, ID and
+#   passport numbers, KRA PINs. Anyone who could reach the portal could
+#   download them without logging in.
+#
+#   .git holds the entire source and its history, which means it also
+#   holds every copy of those dumps that was ever committed.
+#
+#   config/ holds the database password and the mail account's password.
+#
+# This file closes all of that. It is the cheap half of the fix - the
+# dumps should not be in the web root at all, and are no longer tracked
+# in the repository, but a deployment that still has an old copy lying
+# about is protected by this.
+#
+# NOTE FOR WHOEVER HOSTS THIS: an .htaccess file is only read if Apache is
+# configured with "AllowOverride All" (or at least FileInfo Limit Indexes)
+# for this directory. If it is set to None, this file is ignored silently
+# and everything above is still exposed. Check with:
+#
+#     curl -I http://localhost/pbo-portal/schema.sql
+#
+# A 403 means this is working. A 200 means Apache is ignoring this file and
+# the same rules need to go in the site's own configuration instead.
+# ---------------------------------------------------------------------------
+
+
+# No directory listings anywhere.
+Options -Indexes
+
+
+# Database dumps, schema files and anything else holding SQL.
+<FilesMatch "\.(sql|sql\.gz|dump|bak|old|orig|save|swp|log)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+
+# Dot files: .git, .gitignore, .env and friends.
+<FilesMatch "^\.">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+
+# Whole folders that are not for the browser.
+#
+# RedirectMatch rather than <Directory>, which .htaccess is not allowed to
+# use. 404 rather than 403 on purpose: a 403 confirms the path exists.
+RedirectMatch 404 (?i)/\.git(/|$)
+RedirectMatch 404 (?i)/config(/|$)
+RedirectMatch 404 (?i)/database(/|$)
+RedirectMatch 404 (?i)/tests(/|$)
+RedirectMatch 404 (?i)/tools(/|$)
+RedirectMatch 404 (?i)/storage(/|$)
+
+
+# Markdown and text notes that ship with the source.
+<FilesMatch "\.(md|markdown|example|dist|ini|yml|yaml|lock|json)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
