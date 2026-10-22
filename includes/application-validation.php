@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/organization-reach.php';
+
 /*
 |--------------------------------------------------------------------------
 | Application completeness checks
@@ -110,7 +112,8 @@ function pboOrganizationSectionErrors(PDO $db, int $applicationId): array
     $errors = [];
 
     $statement = $db->prepare(
-        'SELECT pbo_name, pbo_registration_number, registration_date, registration_type
+        'SELECT pbo_name, pbo_registration_number, registration_date, registration_type'
+        . (pboHeadquartersColumnAvailable($db) ? ', headquarters_in_kenya' : '') . '
          FROM pbo_applications
          WHERE id = :id
          LIMIT 1'
@@ -156,48 +159,70 @@ function pboOrganizationSectionErrors(PDO $db, int $applicationId): array
     }
 
     /*
-    | Headquarters (latest saved row)
+    |--------------------------------------------------------------------------
+    | Head office - one card or the other, never both
+    |--------------------------------------------------------------------------
+    |
+    | An organization has one head office. Where it is decides which card
+    | has to be complete, and the other is not asked for at all:
+    |
+    |   in Kenya  -> the Kenyan head office card;
+    |   abroad    -> the overseas card in its place.
+    |
+    | The old check demanded both of every international organization, and
+    | that is the bug this fixes: organizations registered as international
+    | whose head office is in Kenya have no body abroad to describe, so
+    | staff copied the Kenyan details into the overseas fields to get past
+    | the page. The register then said a Kenyan organization was its own
+    | foreign parent.
+    |
+    | A national organization is in Kenya by definition, so it takes the
+    | Kenyan branch without being asked.
+    |
     */
 
-    $statement = $db->prepare(
-        'SELECT county, physical_address, postal_address, phone_number, email
-         FROM application_addresses
-         WHERE application_id = :id
-         ORDER BY id DESC
-         LIMIT 1'
-    );
-    $statement->execute([':id' => $applicationId]);
-    $address = $statement->fetch(PDO::FETCH_ASSOC) ?: [];
-
-    $headquartersFields = [
-        'county' => 'Head Office County',
-        'physical_address' => 'Head Office Physical Address',
-        'postal_address' => 'Head Office Postal Address',
-        'phone_number' => 'Head Office Organization Phone Number',
-        'email' => 'Head Office Email of the Organization',
-    ];
-
-    foreach ($headquartersFields as $field => $label) {
-        if ($isBlank($address[$field] ?? null)) {
-            $errors[] = $label . ' is required.';
-        }
-    }
-
-    if ($isBadEmail($address['email'] ?? null)) {
-        $errors[] = 'Head Office Email of the Organization must be a valid email address.';
-    }
-
-    /*
-    | International / parent organization details
-    */
-
-    if ($type === 'international') {
+    if (pboHeadquartersInKenya($application)) {
 
         $statement = $db->prepare(
-            'SELECT parent_organization_name, country_of_origin, registration_number,
-                    parent_physical_address, parent_postal_address, parent_postal_code,
-                    parent_phone_number, parent_email, contact_person_name,
-                    contact_person_phone, contact_person_email
+            'SELECT county, physical_address, postal_address, phone_number, email
+             FROM application_addresses
+             WHERE application_id = :id
+             ORDER BY id DESC
+             LIMIT 1'
+        );
+        $statement->execute([':id' => $applicationId]);
+        $address = $statement->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        $headquartersFields = [
+            'county' => 'Head Office County',
+            'physical_address' => 'Head Office Physical Address',
+            'postal_address' => 'Head Office Postal Address',
+            'phone_number' => 'Head Office Organization Phone Number',
+            'email' => 'Head Office Email of the Organization',
+        ];
+
+        foreach ($headquartersFields as $field => $label) {
+            if ($isBlank($address[$field] ?? null)) {
+                $errors[] = $label . ' is required.';
+            }
+        }
+
+        if ($isBadEmail($address['email'] ?? null)) {
+            $errors[] = 'Head Office Email of the Organization must be a valid email address.';
+        }
+
+    } else {
+
+        /*
+        | The labels come from pboOverseasFields() rather than a second
+        | copy here, so there is one place a label is written and the
+        | page, the review list and this check cannot disagree about
+        | what a field is called.
+        */
+        $overseasFields = pboOverseasFields();
+
+        $statement = $db->prepare(
+            'SELECT ' . implode(', ', array_keys($overseasFields)) . '
              FROM application_international_details
              WHERE application_id = :id
              ORDER BY id DESC
@@ -206,31 +231,28 @@ function pboOrganizationSectionErrors(PDO $db, int $applicationId): array
         $statement->execute([':id' => $applicationId]);
         $international = $statement->fetch(PDO::FETCH_ASSOC) ?: [];
 
-        $internationalFields = [
-            'parent_organization_name' => 'Parent Organization Name',
-            'country_of_origin' => 'Country of Origin',
-            'registration_number' => 'Registration Number',
-            'parent_physical_address' => 'Parent Physical Address',
-            'parent_postal_address' => 'Parent Postal Address',
-            'parent_postal_code' => 'Parent Postal Code',
-            'parent_phone_number' => 'Parent Phone Number',
-            'parent_email' => 'Parent Email',
-            'contact_person_name' => 'Contact Person Name',
-            'contact_person_phone' => 'Contact Person Phone',
-            'contact_person_email' => 'Contact Person Email',
-        ];
-
-        foreach ($internationalFields as $field => $label) {
+        foreach ($overseasFields as $field => $label) {
             if ($isBlank($international[$field] ?? null)) {
                 $errors[] = $label . ' is required.';
             }
         }
 
-        foreach (['parent_email' => 'Parent Email', 'contact_person_email' => 'Contact Person Email'] as $field => $label) {
+        foreach (['parent_email', 'contact_person_email'] as $field) {
             if ($isBadEmail($international[$field] ?? null)) {
-                $errors[] = $label . ' must be a valid email address.';
+                $errors[] = $overseasFields[$field]
+                    . ' must be a valid email address.';
             }
         }
+    }
+
+    /*
+    | An international organization has to have answered where its head
+    | office is. Without the answer the check above falls back to
+    | "abroad", which is a guess, and the submitted record would carry it
+    | as a fact.
+    */
+    if ($type === 'international' && !pboHeadquartersAnswered($application)) {
+        $errors[] = 'Say whether the head office is in Kenya.';
     }
 
     /*
@@ -250,6 +272,19 @@ function pboOrganizationSectionErrors(PDO $db, int $applicationId): array
             $errors[] = (string) $location['county']
                 . ': the organization email entered is not a valid email address.';
         }
+    }
+
+    /*
+    | Areas of operation outside Kenya, on the same terms: naming the
+    | country is enough, but an address that was typed has to be a real
+    | one. Checked through the same shared function the save uses, so
+    | the two cannot drift apart.
+    */
+    foreach (
+        pboForeignLocationErrors(pboForeignLocations($db, $applicationId))
+        as $foreignError
+    ) {
+        $errors[] = $foreignError;
     }
 
     return $errors;

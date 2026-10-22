@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/official-rules.php';
+require_once __DIR__ . '/../includes/organization-reach.php';
 
 requireLogin();
 requirePasswordChanged();
@@ -128,9 +129,14 @@ function signatureExtension(string $path): string
 |--------------------------------------------------------------------------
 */
 
-$applicationId = filter_input(
-    INPUT_GET,
-    'id',
+/*
+| filter_var on $_GET rather than filter_input(INPUT_GET): identical for a
+| real request, and it lets the record be rendered by a test without a web
+| server, which is how the head office cards below are checked. The same
+| change was made to export-excel.php for the same reason.
+*/
+$applicationId = filter_var(
+    $_GET['id'] ?? null,
     FILTER_VALIDATE_INT
 );
 
@@ -231,6 +237,7 @@ $stmt = $db->prepare(
         pbo_registration_number,
         registration_date,
         registration_type,
+        " . (pboHeadquartersColumnAvailable($db) ? 'headquarters_in_kenya,' : '') . "
         status,
         financial_year_start_month,
         financial_year_end_month,
@@ -341,26 +348,22 @@ $operatingLocations = $stmt->fetchAll(PDO::FETCH_ASSOC);
 |--------------------------------------------------------------------------
 */
 
+$foreignLocations = pboForeignLocations($db, $applicationId);
+
+/*
+| Which head office card this record carries. An international record
+| entered before the question existed reads as "abroad", which is what
+| the old form assumed of every one of them.
+*/
+$headOfficeAbroad = pboUsesOverseasHeadOffice($application);
+
 $internationalDetails = null;
 
-if (
-    (string) $application['registration_type'] ===
-    'international'
-) {
+if ($headOfficeAbroad) {
     $stmt = $db->prepare(
         "
         SELECT
-            parent_organization_name,
-            country_of_origin,
-            registration_number,
-            parent_physical_address,
-            parent_postal_address,
-            parent_postal_code,
-            parent_phone_number,
-            parent_email,
-            contact_person_name,
-            contact_person_phone,
-            contact_person_email
+            " . implode(",\n            ", array_keys(pboOverseasFields())) . "
         FROM application_international_details
         WHERE application_id = :application_id
         LIMIT 1
@@ -2343,6 +2346,44 @@ require_once __DIR__ . '/../includes/header.php';
 
                             </div>
 
+
+                            <?php
+                            /*
+                             * Many organizations registered as
+                             * international have their head office here,
+                             * so saying which is the case belongs next to
+                             * the type rather than being left for the
+                             * reader to work out from which card follows.
+                             *
+                             * "Not recorded" for a record entered before
+                             * the question existed: the page treats those
+                             * as based abroad, but that is an assumption,
+                             * not something anybody told us.
+                             */
+                            ?>
+
+                            <?php if ((string) $application['registration_type'] === 'international'): ?>
+
+                                <div class="detail-field">
+
+                                    <span>
+                                        Head Office
+                                    </span>
+
+                                    <strong>
+                                        <?php if (!pboHeadquartersAnswered($application)): ?>
+                                            <span class="muted">Not recorded</span>
+                                        <?php else: ?>
+                                            <?= $headOfficeAbroad
+                                                ? 'Outside Kenya'
+                                                : 'In Kenya' ?>
+                                        <?php endif; ?>
+                                    </strong>
+
+                                </div>
+
+                            <?php endif; ?>
+
                         </div>
 
                     </div>
@@ -2351,6 +2392,15 @@ require_once __DIR__ . '/../includes/header.php';
 
 
                 <!-- ADDRESS & CONTACT -->
+                <!--
+                     One head office, one card. An organization based
+                     abroad shows the overseas card below instead of this
+                     one - never both, which is what the old page did and
+                     why the overseas fields ended up holding a copy of
+                     the Kenyan address.
+                -->
+
+                <?php if (!$headOfficeAbroad): ?>
 
                 <div class="detail-card">
 
@@ -2552,6 +2602,68 @@ require_once __DIR__ . '/../includes/header.php';
 
                 </div>
 
+                <?php endif; ?>
+
+
+                <!-- ==================================================
+                     HEAD OFFICE OUTSIDE KENYA
+
+                     Stands in place of the card above. The labels come
+                     from pboOverseasFields() rather than being written
+                     out here, so this page, the form, the review list
+                     and the exports cannot disagree about what a field
+                     is called.
+                     ================================================== -->
+
+                <?php if ($headOfficeAbroad && $internationalDetails !== null): ?>
+
+                    <div class="detail-card">
+
+                        <div class="detail-card-header gold">
+                            <?= e(pboOverseasHeading()) ?>
+                        </div>
+
+                        <div class="detail-card-body">
+
+                            <div class="detail-grid">
+
+                                <?php
+                                $wideOverseasFields = [
+                                    'parent_organization_name',
+                                    'parent_physical_address',
+                                    'parent_email',
+                                    'contact_person_email',
+                                ];
+
+                                foreach (pboOverseasFields() as $column => $label):
+                                ?>
+
+                                    <div class="detail-field<?=
+                                        in_array($column, $wideOverseasFields, true)
+                                            ? ' span-2'
+                                            : '' ?><?=
+                                        $column === 'parent_organization_name'
+                                            ? ' important'
+                                            : '' ?>">
+
+                                        <span><?= e($label) ?></span>
+
+                                        <strong><?= displayValue(
+                                            $internationalDetails[$column] ?? ''
+                                        ) ?></strong>
+
+                                    </div>
+
+                                <?php endforeach; ?>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                <?php endif; ?>
+
 
                 <!-- ==================================================
                      OTHER AREAS OF OPERATION
@@ -2706,237 +2818,149 @@ require_once __DIR__ . '/../includes/header.php';
 
 
                 <!-- ==================================================
-                     INTERNATIONAL ORGANIZATION
+                     AREAS OF OPERATION OUTSIDE KENYA
+
+                     Organizations run programmes in Canada, the United
+                     States, France. The only place to record where an
+                     organization works was the 47 counties, so anywhere
+                     outside Kenya went unrecorded - for national
+                     organizations as much as international ones, which
+                     is why this card is not conditional on the type.
                      ================================================== -->
 
-                <?php if (
-                    $application[
-                        'registration_type'
-                    ] === 'international' &&
-                    $internationalDetails !== null
-                ): ?>
+                <div class="detail-card">
 
-                    <div class="detail-card">
+                    <div class="detail-card-header">
+                        Areas of Operation Outside Kenya
+                    </div>
 
-                        <div class="detail-card-header gold">
-                            International Registration Details
-                        </div>
+                    <div class="detail-card-body">
 
-                        <div class="detail-card-body">
+                        <?php if ($foreignLocations !== []): ?>
 
-                            <div class="detail-grid">
+                            <div class="operation-status yes">
 
+                                <span class="operation-status-mark">
+                                    &#10003;
+                                </span>
 
-                                <div class="detail-field important">
-
-                                    <span>
-                                        Parent Organization
-                                    </span>
-
-                                    <strong>
-                                        <?= displayValue(
-                                            $internationalDetails[
-                                                'parent_organization_name'
-                                            ]
-                                        ) ?>
-                                    </strong>
-
-                                </div>
-
-
-                                <div class="detail-field">
-
-                                    <span>
-                                        Country of Registration
-                                    </span>
-
-                                    <strong>
-                                        <?= displayValue(
-                                            $internationalDetails[
-                                                'country_of_origin'
-                                            ]
-                                        ) ?>
-                                    </strong>
-
-                                </div>
-
-
-                                <div class="detail-field">
-
-                                    <span>
-                                        Parent Registration Number
-                                    </span>
-
-                                    <strong>
-                                        <?= displayValue(
-                                            $internationalDetails[
-                                                'registration_number'
-                                            ]
-                                        ) ?>
-                                    </strong>
-
-                                </div>
-
-
-                                <div class="detail-field">
-
-                                    <span>
-                                        Parent Physical Address
-                                    </span>
-
-                                    <strong>
-                                        <?= displayValue(
-                                            $internationalDetails[
-                                                'parent_physical_address'
-                                            ]
-                                        ) ?>
-                                    </strong>
-
-                                </div>
-
-
-                                <div class="detail-field">
-
-                                    <span>
-                                        Parent Postal Address
-                                    </span>
-
-                                    <strong>
-                                        <?= displayValue(
-                                            $internationalDetails[
-                                                'parent_postal_address'
-                                            ]
-                                        ) ?>
-                                    </strong>
-
-                                </div>
-
-
-                                <div class="detail-field">
-
-                                    <span>
-                                        Parent Postal Code
-                                    </span>
-
-                                    <strong>
-                                        <?= displayValue(
-                                            $internationalDetails[
-                                                'parent_postal_code'
-                                            ]
-                                        ) ?>
-                                    </strong>
-
-                                </div>
-
-
-                                <div class="detail-field">
-
-                                    <span>
-                                        Parent Phone
-                                    </span>
-
-                                    <strong>
-                                        <?= displayValue(
-                                            $internationalDetails[
-                                                'parent_phone_number'
-                                            ]
-                                        ) ?>
-                                    </strong>
-
-                                </div>
-
-
-                                <div class="detail-field span-2">
-
-                                    <span>
-                                        Parent Email
-                                    </span>
-
-                                    <strong>
-                                        <?= displayValue(
-                                            $internationalDetails[
-                                                'parent_email'
-                                            ]
-                                        ) ?>
-                                    </strong>
-
-                                </div>
+                                <span>
+                                    Yes &mdash; <?= count($foreignLocations) ?>
+                                    <?= count($foreignLocations) === 1
+                                        ? 'country'
+                                        : 'countries' ?>
+                                    recorded.
+                                </span>
 
                             </div>
 
-                        </div>
 
-                    </div>
+                            <?php
+                            /*
+                             * Same treatment as the counties: naming the
+                             * country is enough, so show only what was
+                             * filled in and group the bare ones together.
+                             */
+                            $foreignLabels = pboForeignLocationFields();
+                            unset($foreignLabels['country']);
+
+                            $countriesWithoutDetails = [];
+                            $countriesWithDetails = [];
+
+                            foreach ($foreignLocations as $location) {
+                                $filled = [];
+
+                                foreach ($foreignLabels as $column => $label) {
+                                    if (hasValue($location[$column] ?? '')) {
+                                        $filled[$label] = (string) $location[$column];
+                                    }
+                                }
+
+                                if ($filled === []) {
+                                    $countriesWithoutDetails[] =
+                                        (string) ($location['country'] ?? '');
+                                } else {
+                                    $countriesWithDetails[] = [
+                                        'country' => (string) ($location['country'] ?? ''),
+                                        'fields' => $filled,
+                                    ];
+                                }
+                            }
+                            ?>
 
 
-                    <div class="detail-card">
+                            <?php if ($countriesWithoutDetails !== []): ?>
 
-                        <div class="detail-card-header gold">
-                            Parent Organization Contact Person
-                        </div>
+                                <div class="selection-panel">
 
-                        <div class="detail-card-body">
+                                    <div class="selection-grid">
 
-                            <div class="detail-grid">
+                                        <?php foreach ($countriesWithoutDetails as $countryName): ?>
+
+                                            <div class="selection-item">
+                                                <span class="selection-mark">&#10003;</span>
+                                                <span><?= displayValue($countryName) ?></span>
+                                            </div>
+
+                                        <?php endforeach; ?>
+
+                                    </div>
+
+                                </div>
+
+                            <?php endif; ?>
 
 
-                                <div class="detail-field">
+                            <?php foreach ($countriesWithDetails as $location): ?>
 
-                                    <span>
-                                        Contact Person
-                                    </span>
+                                <div class="operation-location">
 
-                                    <strong>
-                                        <?= displayValue(
-                                            $internationalDetails[
-                                                'contact_person_name'
-                                            ]
-                                        ) ?>
-                                    </strong>
+                                    <div class="operation-location-header">
+                                        <?= displayValue($location['country']) ?>
+                                    </div>
+
+                                    <div class="operation-location-body">
+
+                                        <div class="detail-grid">
+
+                                            <?php foreach ($location['fields'] as $label => $value): ?>
+
+                                                <div class="detail-field<?= in_array($label, ['Physical Address', 'Email'], true) ? ' span-2' : '' ?>">
+                                                    <span><?= e($label) ?></span>
+                                                    <strong><?= e($value) ?></strong>
+                                                </div>
+
+                                            <?php endforeach; ?>
+
+                                        </div>
+
+                                    </div>
 
                                 </div>
 
+                            <?php endforeach; ?>
 
-                                <div class="detail-field">
+                        <?php else: ?>
 
-                                    <span>
-                                        Contact Person Phone
-                                    </span>
+                            <div class="operation-status no">
 
-                                    <strong>
-                                        <?= displayValue(
-                                            $internationalDetails[
-                                                'contact_person_phone'
-                                            ]
-                                        ) ?>
-                                    </strong>
+                                <span class="operation-status-mark">
+                                    &mdash;
+                                </span>
 
-                                </div>
-
-
-                                <div class="detail-field">
-
-                                    <span>
-                                        Contact Person Email
-                                    </span>
-
-                                    <strong>
-                                        <?= displayValue(
-                                            $internationalDetails[
-                                                'contact_person_email'
-                                            ]
-                                        ) ?>
-                                    </strong>
-
-                                </div>
+                                <span>
+                                    No &mdash; the organization has no
+                                    recorded areas of operation outside
+                                    Kenya.
+                                </span>
 
                             </div>
 
-                        </div>
+                        <?php endif; ?>
 
                     </div>
 
-                <?php endif; ?>
+                </div>
 
             </div>
 

@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/organization-reach.php';
+
 /*
 |--------------------------------------------------------------------------
 | Audit trail helpers
@@ -149,7 +151,8 @@ function pboAuditSnapshot(PDO $db, int $applicationId): array
 
     $application = $one(
         'SELECT pbo_name, pbo_registration_number, registration_date, registration_type,
-                financial_year_start_month, financial_year_end_month
+                financial_year_start_month, financial_year_end_month'
+        . (pboHeadquartersColumnAvailable($db) ? ', headquarters_in_kenya' : '') . '
          FROM pbo_applications WHERE id = :id LIMIT 1'
     );
 
@@ -157,6 +160,18 @@ function pboAuditSnapshot(PDO $db, int $applicationId): array
     $fields['PBO registration number']  = $text($application['pbo_registration_number'] ?? '');
     $fields['Registration date']        = $text($application['registration_date'] ?? '');
     $fields['Type of organization']     = ucfirst($text($application['registration_type'] ?? ''));
+
+    /*
+    | Where the head office is, for an international organization. Worth
+    | an audit field of its own: it decides which head office card the
+    | record carries, so a change to it changes what the record means.
+    */
+    if (strtolower($text($application['registration_type'] ?? '')) === 'international') {
+        $fields['Head office in Kenya'] = pboHeadquartersAnswered($application)
+            ? (pboHeadquartersInKenya($application) ? 'Yes' : 'No')
+            : '';
+    }
+
     $fields['Financial year starts']    = pboAuditMonthName($application['financial_year_start_month'] ?? '');
     $fields['Financial year ends']      = pboAuditMonthName($application['financial_year_end_month'] ?? '');
 
@@ -221,22 +236,41 @@ function pboAuditSnapshot(PDO $db, int $applicationId): array
         'SELECT * FROM application_international_details WHERE application_id = :id ORDER BY id DESC LIMIT 1'
     );
 
-    $internationalLabels = [
-        'parent_organization_name' => 'Parent organization',
-        'country_of_origin'        => 'Country of origin',
-        'registration_number'      => 'Parent registration number',
-        'parent_physical_address'  => 'Parent physical address',
-        'parent_postal_address'    => 'Parent postal address',
-        'parent_postal_code'       => 'Parent postal code',
-        'parent_phone_number'      => 'Parent phone',
-        'parent_email'             => 'Parent email',
-        'contact_person_name'      => 'Contact person',
-        'contact_person_phone'     => 'Contact person phone',
-        'contact_person_email'     => 'Contact person email',
-    ];
+    /*
+    | Labels from pboOverseasFields() rather than a second copy here, so
+    | an audit entry calls a field what the form calls it. Prefixed,
+    | because "Country" and "Email" on their own would collide with the
+    | Kenyan head office fields above.
+    */
+    foreach (pboOverseasFields() as $column => $label) {
+        $fields['Head office abroad: ' . lcfirst($label)] =
+            $text($international[$column] ?? '');
+    }
 
-    foreach ($internationalLabels as $column => $label) {
-        $fields[$label] = $text($international[$column] ?? '');
+
+    /* Areas of operation outside Kenya */
+
+    foreach (pboForeignLocations($db, $applicationId) as $location) {
+        $country = $text($location['country'] ?? '');
+
+        if ($country === '') {
+            continue;
+        }
+
+        $details = [];
+
+        foreach (pboForeignLocationFields() as $column => $label) {
+            if ($column === 'country') {
+                continue;
+            }
+
+            $details[$label] = $text($location[$column] ?? '');
+        }
+
+        $lists['Area outside Kenya'][$country] = [
+            'name' => $country,
+            'details' => $details,
+        ];
     }
 
 

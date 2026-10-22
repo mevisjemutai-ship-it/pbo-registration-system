@@ -6,6 +6,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/official-rules.php';
 require_once __DIR__ . '/../includes/application-validation.php';
+require_once __DIR__ . '/../includes/organization-reach.php';
 
 requireLogin();
 requirePasswordChanged();
@@ -369,19 +370,23 @@ $csrfToken =
 |--------------------------------------------------------------------------
 */
 
+/*
+| filter_var on $_GET / $_POST rather than filter_input: identical for a
+| real request, and it lets the page be rendered by a test without a web
+| server, which is how the head office sections are checked. The same
+| change was made to export-excel.php and view.php for the same reason.
+*/
 $applicationId =
-    filter_input(
-        INPUT_GET,
-        'id',
+    filter_var(
+        $_GET['id'] ?? null,
         FILTER_VALIDATE_INT
     );
 
 if (!$applicationId) {
 
     $applicationId =
-        filter_input(
-            INPUT_POST,
-            'application_id',
+        filter_var(
+            $_POST['application_id'] ?? null,
             FILTER_VALIDATE_INT
         );
 }
@@ -415,6 +420,7 @@ $statement =
             pbo_registration_number,
             registration_date,
             registration_type,
+            " . (pboHeadquartersColumnAvailable($connection) ? 'headquarters_in_kenya,' : '') . "
             status,
             current_step,
             financial_year_start_month,
@@ -535,29 +541,26 @@ if (!$address) {
 |--------------------------------------------------------------------------
 */
 
+/*
+| Which head office card this application carries. Read the same way
+| everywhere: a national organization is in Kenya, an international one is
+| whatever was answered, and an international record entered before the
+| question existed reads as abroad - which is what the old form assumed of
+| every one of them.
+*/
+$headOfficeAbroad = pboUsesOverseasHeadOffice($application);
+
 $internationalDetails = null;
 
-if (
-    $application[
-        'registration_type'
-    ] === 'international'
-) {
+if ($headOfficeAbroad) {
+
+    $overseasFields = pboOverseasFields();
 
     $statement =
         $connection->prepare(
             "
             SELECT
-                parent_organization_name,
-                country_of_origin,
-                registration_number,
-                parent_physical_address,
-                parent_postal_address,
-                parent_postal_code,
-                parent_phone_number,
-                parent_email,
-                contact_person_name,
-                contact_person_phone,
-                contact_person_email
+                " . implode(",\n                ", array_keys($overseasFields)) . "
             FROM application_international_details
             WHERE application_id =
                 :application_id
@@ -578,22 +581,18 @@ if (
 
     if (!$internationalDetails) {
 
-        $internationalDetails = [
-
-            'parent_organization_name' => '',
-            'country_of_origin' => '',
-            'registration_number' => '',
-            'parent_physical_address' => '',
-            'parent_postal_address' => '',
-            'parent_postal_code' => '',
-            'parent_phone_number' => '',
-            'parent_email' => '',
-            'contact_person_name' => '',
-            'contact_person_phone' => '',
-            'contact_person_email' => '',
-        ];
+        /*
+        | Nothing saved yet: show the card with every field blank rather
+        | than hiding it, so the review page says what is missing instead
+        | of leaving a gap the person has to notice for themselves.
+        */
+        $internationalDetails = array_fill_keys(array_keys($overseasFields), '');
     }
 }
+
+
+/* Areas of operation outside Kenya, for either type of organization. */
+$foreignLocations = pboForeignLocations($connection, $applicationId);
 
 
 /*
@@ -2055,6 +2054,41 @@ require_once __DIR__ .
                     </div>
 
 
+                    <?php if (
+                        $application['registration_type'] === 'international'
+                    ): ?>
+
+                        <div class="review-field">
+
+                            <span class="review-field-label">
+                                Head Office
+                            </span>
+
+                            <span class="review-field-value">
+                                <?= !pboHeadquartersAnswered($application)
+                                    ? 'Not answered'
+                                    : ($headOfficeAbroad
+                                        ? 'Outside Kenya'
+                                        : 'In Kenya') ?>
+                            </span>
+
+                        </div>
+
+                    <?php endif; ?>
+
+
+                    <?php
+                    /*
+                     * One head office, one set of fields. When it is
+                     * abroad the particulars are in section 1A instead,
+                     * and asking for both is what forced staff to copy
+                     * the Kenyan address into the overseas fields.
+                     */
+                    ?>
+
+                    <?php if (!$headOfficeAbroad): ?>
+
+
                     <div class="review-field">
 
                         <span class="review-field-label">
@@ -2252,6 +2286,8 @@ require_once __DIR__ .
 
                     </div>
 
+                    <?php endif; ?>
+
                 </div>
 
 
@@ -2384,20 +2420,162 @@ require_once __DIR__ .
 
                 </div>
 
+
+                <!--
+                     Areas of operation outside Kenya. Not conditional on
+                     the type: a Kenyan organization running a programme
+                     abroad is an ordinary thing, and until now the
+                     register could not say so - the only place to record
+                     where an organization works was the 47 counties.
+                -->
+
+                <div class="optional-block">
+
+                    <h3 class="optional-block-title">
+                        Areas of Operation Outside Kenya
+                    </h3>
+
+                    <?php if ($foreignLocations === []): ?>
+
+                        <span class="text-muted">
+                            No areas of operation outside Kenya.
+                        </span>
+
+                    <?php else: ?>
+
+                        <?php
+                        /*
+                         * Same treatment as the counties above, and the
+                         * same markup, so the two read as one list
+                         * rather than two different ideas: naming the
+                         * country is enough, and only the ones with
+                         * office details get a card.
+                         */
+                        $foreignWithOffices = [];
+
+                        foreach ($foreignLocations as $location) {
+                            foreach (pboForeignLocationFields() as $field => $label) {
+                                if ($field !== 'country' && hasValue($location[$field] ?? '')) {
+                                    $foreignWithOffices[] = $location;
+                                    break;
+                                }
+                            }
+                        }
+
+                        $foreignDetailFields = pboForeignLocationFields();
+                        unset($foreignDetailFields['country']);
+                        ?>
+
+                        <p
+                            style="
+                                margin: 0 0 10px;
+                                color: var(--text-secondary);
+                                font-size: 11px;
+                            "
+                        >
+                            <?= count($foreignLocations) ?>
+                            <?= count($foreignLocations) === 1 ? 'country' : 'countries' ?>
+                            recorded<?= $foreignWithOffices !== []
+                                ? ', ' . count($foreignWithOffices) . ' with office details'
+                                : '' ?>.
+                        </p>
+
+                        <div class="review-tags">
+
+                            <?php foreach ($foreignLocations as $location): ?>
+
+                                <span class="review-tag">
+
+                                    <span class="review-tag-check">
+                                        &#10003;
+                                    </span>
+
+                                    <?= e((string) ($location['country'] ?? '')) ?>
+
+                                </span>
+
+                            <?php endforeach; ?>
+
+                        </div>
+
+
+                        <?php if ($foreignWithOffices !== []): ?>
+
+                            <div
+                                class="official-grid"
+                                style="margin-top: 16px;"
+                            >
+
+                                <?php foreach ($foreignWithOffices as $location): ?>
+
+                                    <article class="official-card">
+
+                                        <div class="official-card-header">
+
+                                            <span>
+                                                Office details
+                                            </span>
+
+                                            <h3>
+                                                <?= e((string) ($location['country'] ?? '')) ?>
+                                            </h3>
+
+                                        </div>
+
+
+                                        <div class="official-card-body">
+
+                                            <div class="review-grid">
+
+                                                <?php foreach (
+                                                    $foreignDetailFields
+                                                    as $field => $label
+                                                ): ?>
+
+                                                    <?php if (hasValue($location[$field] ?? '')): ?>
+
+                                                        <div class="review-field">
+
+                                                            <span class="review-field-label">
+                                                                <?= e($label) ?>
+                                                            </span>
+
+                                                            <span class="review-field-value">
+                                                                <?= e((string) $location[$field]) ?>
+                                                            </span>
+
+                                                        </div>
+
+                                                    <?php endif; ?>
+
+                                                <?php endforeach; ?>
+
+                                            </div>
+
+                                        </div>
+
+                                    </article>
+
+                                <?php endforeach; ?>
+
+                            </div>
+
+                        <?php endif; ?>
+
+                    <?php endif; ?>
+
+                </div>
+
             </div>
 
         </section>
 
 
         <!-- ======================================================
-             1A. INTERNATIONAL DETAILS
+             1A. HEAD OFFICE OUTSIDE KENYA
              ====================================================== -->
 
-        <?php if (
-            $application[
-                'registration_type'
-            ] === 'international'
-        ): ?>
+        <?php if ($headOfficeAbroad): ?>
 
             <section class="review-section">
 
@@ -2412,11 +2590,12 @@ require_once __DIR__ .
                         <div>
 
                             <h2>
-                                International Registration Status
+                                <?= e(pboOverseasHeading()) ?>
                             </h2>
 
                             <p>
-                                Parent organization and contact-person particulars.
+                                The organization's own head office abroad and
+                                the person to contact there.
                             </p>
 
                         </div>
@@ -2442,48 +2621,17 @@ require_once __DIR__ .
                     <div class="review-grid">
 
                         <?php
-
-                        $internationalReviewFields = [
-
-                            'parent_organization_name'
-                                => 'Parent Organization',
-
-                            'country_of_origin'
-                                => 'Country of Registration',
-
-                            'registration_number'
-                                => 'PBO / Charity Registration Number',
-
-                            'parent_physical_address'
-                                => 'Physical Address',
-
-                            'parent_postal_address'
-                                => 'Postal Address',
-
-                            'parent_postal_code'
-                                => 'Postal Code',
-
-                            'parent_phone_number'
-                                => 'Parent Organization Phone',
-
-                            'parent_email'
-                                => 'Parent Organization Email',
-
-                            'contact_person_name'
-                                => 'Contact Person',
-
-                            'contact_person_phone'
-                                => 'Contact Person Phone',
-
-                            'contact_person_email'
-                                => 'Contact Person Email',
-                        ];
-
+                        /*
+                         * The labels come from pboOverseasFields(), the
+                         * same place the form and the records page take
+                         * them from, so the three cannot drift apart -
+                         * which is how "Country of Origin" survived in
+                         * one place after being renamed in another.
+                         */
                         ?>
 
-
                         <?php foreach (
-                            $internationalReviewFields
+                            pboOverseasFields()
                             as $field => $label
                         ): ?>
 

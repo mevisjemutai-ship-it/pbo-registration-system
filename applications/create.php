@@ -7,6 +7,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/application-validation.php';
 require_once __DIR__ . '/../includes/kenya-locations.php';
 require_once __DIR__ . '/../includes/text-case.php';
+require_once __DIR__ . '/../includes/organization-reach.php';
 
 requireLogin();
 requirePasswordChanged();
@@ -123,11 +124,25 @@ foreach ($countyOptions as $county) {
 |--------------------------------------------------------------------------
 */
 
+/*
+| Areas of operation outside Kenya - open to national organizations too,
+| because a Kenyan organization running a programme abroad is an ordinary
+| thing the register previously had nowhere to record.
+*/
+$foreignLocations = [];
+$operatesAbroad = 'no';
+
 $form = [
     'pbo_name' => '',
     'pbo_registration_number' => '',
     'registration_date' => '',
     'registration_type' => '',
+
+    /*
+    | '1' head office in Kenya, '0' abroad, '' not answered. Only asked of
+    | an international organization; a national one is always in Kenya.
+    */
+    'headquarters_in_kenya' => '',
 
     'county' => '',
     'city_town' => '',
@@ -428,6 +443,16 @@ if ($applicationId > 0) {
         $operatesOtherLocations = 'yes';
     }
 
+    /*
+    | Areas of operation outside Kenya. Returns an empty list on a server
+    | where the migration has not been run, so the page still works.
+    */
+    $foreignLocations = pboForeignLocations($connection, $applicationId);
+
+    if (count($foreignLocations) > 0) {
+        $operatesAbroad = 'yes';
+    }
+
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         $submissionGaps = pboOrganizationSectionErrors(
             $connection,
@@ -546,6 +571,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     /*
+    | Areas of operation outside Kenya. Rows with no country named are
+    | dropped: an empty card somebody added and thought better of is not
+    | a mistake worth reporting.
+    */
+    $operatesAbroad = ($_POST['operates_abroad'] ?? 'no') === 'yes' ? 'yes' : 'no';
+
+    $foreignLocations = $operatesAbroad === 'yes'
+        ? pboNormaliseForeignLocations($_POST['foreign_locations'] ?? [])
+        : [];
+
+    if ($foreignLocations === []) {
+        $operatesAbroad = 'no';
+    }
+
+    /*
     |--------------------------------------------------------------------------
     | Validation
     |--------------------------------------------------------------------------
@@ -581,6 +621,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     /*
+    | An international organization has to say where its head office is,
+    | because the answer decides which card it fills in. A national one is
+    | in Kenya by definition, so the question is not asked and the stored
+    | answer is set rather than left to drift.
+    */
+    if ($form['registration_type'] === 'national') {
+        $form['headquarters_in_kenya'] = '1';
+    } elseif (
+        $form['registration_type'] === 'international'
+        && !in_array($form['headquarters_in_kenya'], ['0', '1'], true)
+    ) {
+        $errors[] = 'Say whether the head office is in Kenya.';
+    }
+
+    /*
     |--------------------------------------------------------------------------
     | Format problems that must not cost somebody their work
     |--------------------------------------------------------------------------
@@ -602,7 +657,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $emailFields = [
         'email' => 'Head Office Email of the Organization',
-        'parent_email' => 'Parent Email',
+        'parent_email' => 'Email',
         'contact_person_email' => 'Contact Person Email',
     ];
 
@@ -614,6 +669,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $warnings[] = $label . ' does not look like an email address. '
                 . 'It has been saved as typed - correct it before submitting.';
         }
+    }
+
+    foreach (pboForeignLocationErrors($foreignLocations) as $foreignWarning) {
+        $warnings[] = $foreignWarning
+            . ' It has been saved as typed - correct it before submitting.';
     }
 
     foreach ($operatingLocations as $location) {
@@ -640,6 +700,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (count($errors) === 0) {
 
+        /*
+        | Written only when the migration has added the column, so the
+        | page keeps working on a server that has the code and not yet
+        | the database change.
+        */
+        $hasHeadquartersColumn = pboHeadquartersColumnAvailable($connection);
+
         try {
 
             $connection->beginTransaction();
@@ -659,6 +726,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         pbo_registration_number,
                         registration_date,
                         registration_type,
+                        " . ($hasHeadquartersColumn ? 'headquarters_in_kenya,' : '') . "
                         status,
                         current_step,
                         created_by,
@@ -673,6 +741,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         :pbo_registration_number,
                         :registration_date,
                         :registration_type,
+                        " . ($hasHeadquartersColumn ? ':headquarters_in_kenya,' : '') . "
                         'draft',
                         :current_step,
                         :created_by,
@@ -683,7 +752,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     "
                 );
 
-                $statement->execute([
+                $parameters = [
                     ':application_reference' => $referenceNumber,
                     ':pbo_name' => $form['pbo_name'],
                     ':pbo_registration_number' => $form['pbo_registration_number'],
@@ -692,7 +761,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ':current_step' => $targetStep,
                     ':created_by' => $userId,
                     ':updated_by' => $userId,
-                ]);
+                ];
+
+                if ($hasHeadquartersColumn) {
+                    $parameters[':headquarters_in_kenya'] =
+                        $form['headquarters_in_kenya'] !== ''
+                            ? (int) $form['headquarters_in_kenya']
+                            : null;
+                }
+
+                $statement->execute($parameters);
 
                 $applicationId = (int) $connection->lastInsertId();
 
@@ -732,6 +810,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         pbo_registration_number = :pbo_registration_number,
                         registration_date = :registration_date,
                         registration_type = :registration_type,
+                        " . ($hasHeadquartersColumn ? 'headquarters_in_kenya = :headquarters_in_kenya,' : '') . "
                         current_step = GREATEST(COALESCE(current_step, 1), :current_step),
                         updated_by = :updated_by,
                         updated_at = NOW()
@@ -740,7 +819,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     "
                 );
 
-                $statement->execute([
+                $parameters = [
                     ':pbo_name' => $form['pbo_name'],
                     ':pbo_registration_number' => $form['pbo_registration_number'],
                     ':registration_date' => $form['registration_date'],
@@ -749,7 +828,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ':updated_by' => $userId,
                     ':id' => $applicationId,
                     ':created_by' => $userId,
-                ]);
+                ];
+
+                if ($hasHeadquartersColumn) {
+                    $parameters[':headquarters_in_kenya'] =
+                        $form['headquarters_in_kenya'] !== ''
+                            ? (int) $form['headquarters_in_kenya']
+                            : null;
+                }
+
+                $statement->execute($parameters);
             }
 
             /*
@@ -930,6 +1018,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             /*
+            | Areas of operation outside Kenya
+            |
+            | Delete then insert, like the counties above, so a save can
+            | never leave duplicates behind. Does nothing on a server
+            | where the table has not been created yet.
+            */
+
+            pboSaveForeignLocations($connection, $applicationId, $foreignLocations);
+
+            /*
             | Audit
             */
 
@@ -1006,6 +1104,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 }
+
+/*
+| Which of the two head office cards to show, worked out once here so the
+| three places in the markup that depend on it cannot drift apart. The
+| page's JavaScript repeats the same rule for when the radio is clicked.
+*/
+$headOfficeCards = pboHeadOfficeCards(
+    $form['registration_type'],
+    (string) $form['headquarters_in_kenya']
+);
 
 require_once __DIR__ . '/../includes/header.php';
 ?>
@@ -1585,7 +1693,101 @@ require_once __DIR__ . '/../includes/header.php';
              HEADQUARTERS
              ========================================================== -->
 
-        <section class="application-section">
+        <!-- ==========================================================
+             WHERE IS THE HEAD OFFICE?
+
+             Only asked of an international organization. It decides
+             which card they fill in next: the ordinary Kenyan head
+             office, or the overseas one. Before this existed, every
+             international record was assumed to have a parent body
+             abroad, and the ones that did not had the overseas fields
+             filled with their own Kenyan address to get past the page.
+             ========================================================== -->
+
+        <section
+            class="application-section"
+            id="headquarters-question-section"
+            data-headquarters-question
+            style="display: <?= $headOfficeCards['question'] ? 'block' : 'none' ?>;"
+        >
+
+            <div class="application-section-heading">
+
+                <div>
+
+                    <h2>
+                        Head Office Location
+                    </h2>
+
+                    <p>
+                        Is the organization's head office in Kenya?
+                    </p>
+
+                </div>
+
+            </div>
+
+            <div class="form-group">
+
+                <div
+                    class="choice-toggle"
+                    role="radiogroup"
+                    aria-label="Is the head office in Kenya?"
+                >
+
+                    <label class="choice-toggle-option">
+
+                        <input
+                            type="radio"
+                            name="headquarters_in_kenya"
+                            value="1"
+                            <?= $form['headquarters_in_kenya'] === '1' ? 'checked' : '' ?>
+                        >
+
+                        <span>Yes, in Kenya</span>
+
+                    </label>
+
+
+                    <label class="choice-toggle-option">
+
+                        <input
+                            type="radio"
+                            name="headquarters_in_kenya"
+                            value="0"
+                            <?= $form['headquarters_in_kenya'] === '0' ? 'checked' : '' ?>
+                        >
+
+                        <span>No, outside Kenya</span>
+
+                    </label>
+
+                </div>
+
+                <span class="form-help">
+                    Many organizations registered as international have their
+                    head office here and no body abroad. If that is the case,
+                    answer Yes and fill in the Kenyan address as usual.
+                </span>
+
+            </div>
+
+        </section>
+
+
+        <section class="application-section" id="headquarters-section">
+
+            <!--
+                The heading and the Kenyan head office fields sit inside
+                data-kenyan-head-office so they can be hidden together when
+                the head office is abroad. Areas of operation are further
+                down in this same section and must stay visible either way,
+                which is why the wrapper is here rather than on the section.
+            -->
+            <div
+                data-kenyan-head-office
+                style="display: <?= $headOfficeCards['kenyan'] ? 'block' : 'none' ?>;"
+            >
 
             <div class="application-section-heading">
 
@@ -1649,6 +1851,7 @@ require_once __DIR__ . '/../includes/header.php';
                         value="<?= old($form, 'county') ?>"
                         placeholder="Enter County"
                         required
+                        data-kenyan-required="true"
                     >
 
                 </div>
@@ -1738,6 +1941,7 @@ require_once __DIR__ . '/../includes/header.php';
                     value="<?= old($form, 'physical_address') ?>"
                     placeholder="Enter Physical Address"
                     required
+                    data-kenyan-required="true"
                 >
 
             </div>
@@ -1762,6 +1966,7 @@ require_once __DIR__ . '/../includes/header.php';
                     value="<?= old($form, 'postal_address') ?>"
                     placeholder="Enter Postal Address"
                     required
+                    data-kenyan-required="true"
                 >
 
             </div>
@@ -1788,6 +1993,7 @@ require_once __DIR__ . '/../includes/header.php';
                         value="<?= old($form, 'phone_number') ?>"
                         placeholder="Enter Organization Phone Number"
                         required
+                        data-kenyan-required="true"
                     >
 
                 </div>
@@ -1833,9 +2039,329 @@ require_once __DIR__ . '/../includes/header.php';
                     value="<?= old($form, 'email') ?>"
                     placeholder="Enter Organization Email"
                     required
+                    data-kenyan-required="true"
                 >
 
             </div>
+
+
+            </div><!-- /data-kenyan-head-office -->
+
+        <!-- ==========================================================
+             SECTION 2, THE OTHER CARD
+             HEAD OFFICE OUTSIDE KENYA
+
+             This stands in PLACE of the Kenyan head office card above,
+             never alongside it, which is why it carries the same step
+             number and sits here rather than at the foot of the page.
+             ========================================================== -->
+
+            <div
+                id="international-section"
+                style="display: <?= $headOfficeCards['overseas'] ? 'block' : 'none' ?>;"
+            >
+
+            <div class="application-section-heading">
+
+                <div class="application-section-number">
+                    2
+                </div>
+
+                <div>
+
+                    <h2>
+                        <?= e(pboOverseasHeading()) ?>
+                    </h2>
+
+                    <p>
+                        Provide the organization's registration and head office
+                        details in the country it is based in.
+                    </p>
+
+                </div>
+
+            </div>
+
+            <div class="form-row">
+
+                <div class="form-group">
+
+                    <label for="parent_organization_name">
+
+                        Name of the Organization
+
+                        <span class="required">*</span>
+
+                    </label>
+
+                    <input
+                        type="text"
+                        id="parent_organization_name"
+                        name="parent_organization_name"
+                        value="<?= old(
+                            $form,
+                            'parent_organization_name'
+                        ) ?>"
+                        data-international-required="true"
+                    >
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="country_of_origin">
+
+                        Country
+
+                        <span class="required">*</span>
+
+                    </label>
+
+                    <input
+                        type="text"
+                        id="country_of_origin"
+                        name="country_of_origin"
+                        value="<?= old(
+                            $form,
+                            'country_of_origin'
+                        ) ?>"
+                        data-international-required="true"
+                    >
+
+                </div>
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="registration_number">
+
+                    Registration Number
+
+                    <span class="required">*</span>
+
+                </label>
+
+                <input
+                    type="text"
+                    id="registration_number"
+                    name="registration_number"
+                    value="<?= old(
+                        $form,
+                        'registration_number'
+                    ) ?>"
+                    data-international-required="true"
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="parent_physical_address">
+
+                    Physical Address
+
+                    <span class="required">*</span>
+
+                </label>
+
+                <input
+                    type="text"
+                    id="parent_physical_address"
+                    name="parent_physical_address"
+                    value="<?= old(
+                        $form,
+                        'parent_physical_address'
+                    ) ?>"
+                    data-international-required="true"
+                >
+
+            </div>
+
+
+            <div class="form-row">
+
+                <div class="form-group">
+
+                    <label for="parent_postal_address">
+
+                        Postal Address
+
+                        <span class="required">*</span>
+
+                    </label>
+
+                    <input
+                        type="text"
+                        id="parent_postal_address"
+                        name="parent_postal_address"
+                        value="<?= old(
+                            $form,
+                            'parent_postal_address'
+                        ) ?>"
+                        data-international-required="true"
+                    >
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="parent_postal_code">
+
+                        Postal Code
+
+                        <span class="required">*</span>
+
+                    </label>
+
+                    <input
+                        type="text"
+                        id="parent_postal_code"
+                        name="parent_postal_code"
+                        value="<?= old(
+                            $form,
+                            'parent_postal_code'
+                        ) ?>"
+                        data-international-required="true"
+                    >
+
+                </div>
+
+            </div>
+
+
+            <div class="form-row">
+
+                <div class="form-group">
+
+                    <label for="parent_phone_number">
+
+                        Telephone
+
+                        <span class="required">*</span>
+
+                    </label>
+
+                    <input
+                        type="tel"
+                        id="parent_phone_number"
+                        name="parent_phone_number"
+                        value="<?= old(
+                            $form,
+                            'parent_phone_number'
+                        ) ?>"
+                        data-international-required="true"
+                    >
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="parent_email">
+
+                        Email
+
+                        <span class="required">*</span>
+
+                    </label>
+
+                    <input
+                        type="email"
+                        id="parent_email"
+                        name="parent_email"
+                        value="<?= old(
+                            $form,
+                            'parent_email'
+                        ) ?>"
+                        data-international-required="true"
+                    >
+
+                </div>
+
+            </div>
+
+
+            <div class="form-row">
+
+                <div class="form-group">
+
+                    <label for="contact_person_name">
+
+                        Contact Person Name
+
+                        <span class="required">*</span>
+
+                    </label>
+
+                    <input
+                        type="text"
+                        id="contact_person_name"
+                        name="contact_person_name"
+                        value="<?= old(
+                            $form,
+                            'contact_person_name'
+                        ) ?>"
+                        data-international-required="true"
+                    >
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="contact_person_phone">
+
+                        Contact Person Phone
+
+                        <span class="required">*</span>
+
+                    </label>
+
+                    <input
+                        type="tel"
+                        id="contact_person_phone"
+                        name="contact_person_phone"
+                        value="<?= old(
+                            $form,
+                            'contact_person_phone'
+                        ) ?>"
+                        data-international-required="true"
+                    >
+
+                </div>
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="contact_person_email">
+
+                    Contact Person Email
+
+                    <span class="required">*</span>
+
+                </label>
+
+                <input
+                    type="email"
+                    id="contact_person_email"
+                    name="contact_person_email"
+                    value="<?= old(
+                        $form,
+                        'contact_person_email'
+                    ) ?>"
+                    data-international-required="true"
+                >
+
+            </div>
+
+            </div><!-- /international-section -->
 
 
             <!-- ======================================================
@@ -2067,324 +2593,156 @@ require_once __DIR__ . '/../includes/header.php';
 
             </div>
 
-        </section>
 
+            <!-- ======================================================
+                 AREAS OF OPERATION OUTSIDE KENYA
 
-        <!-- ==========================================================
-             SECTION 3
-             INTERNATIONAL DETAILS
-             ========================================================== -->
+                 Open to national organizations too, not only
+                 international ones. A Kenyan organization running a
+                 programme in Uganda or the United States is an ordinary
+                 thing, and the only place to record where an
+                 organization works was a list of the 47 counties - so
+                 anywhere outside Kenya simply went unrecorded.
+                 ====================================================== -->
 
-        <section
-            class="application-section"
-            id="international-section"
-            style="
-                display: <?= $form['registration_type'] === 'international'
-                    ? 'block'
-                    : 'none' ?>;
-            "
-        >
+            <div
+                id="foreign-locations-section"
+                class="other-locations-container"
+            >
 
-            <div class="application-section-heading">
+                <div class="application-section-heading">
 
-                <div class="application-section-number">
-                    3
+                    <div>
+
+                        <h3>
+                            Areas of Operation Outside Kenya
+                        </h3>
+
+                        <p>
+                            Does the organization operate in any country
+                            other than Kenya?
+                        </p>
+
+                    </div>
+
                 </div>
 
-                <div>
+                <div class="form-group">
 
-                    <h2>
-                        International Organization Details
-                    </h2>
+                    <div
+                        class="choice-toggle"
+                        role="radiogroup"
+                        aria-label="Does the organization operate outside Kenya?"
+                    >
 
-                    <p>
-                        Provide the registration and parent organization details.
+                        <label class="choice-toggle-option">
+
+                            <input
+                                type="radio"
+                                name="operates_abroad"
+                                value="yes"
+                                <?= $operatesAbroad === 'yes' ? 'checked' : '' ?>
+                            >
+
+                            <span>Yes</span>
+
+                        </label>
+
+
+                        <label class="choice-toggle-option">
+
+                            <input
+                                type="radio"
+                                name="operates_abroad"
+                                value="no"
+                                <?= $operatesAbroad !== 'yes' ? 'checked' : '' ?>
+                            >
+
+                            <span>No</span>
+
+                        </label>
+
+                    </div>
+
+                </div>
+
+
+                <div
+                    id="foreign-locations-body"
+                    style="display: <?= $operatesAbroad === 'yes' ? 'block' : 'none' ?>;"
+                >
+
+                    <div id="foreign-location-cards">
+
+                        <?php foreach ($foreignLocations as $index => $foreignLocation): ?>
+
+                            <div class="operating-location-block" data-foreign-card>
+
+                                <div class="operating-location-header">
+
+                                    <strong>
+                                        Country <?= (int) $index + 1 ?>
+                                    </strong>
+
+                                    <button
+                                        type="button"
+                                        class="btn btn-sm btn-outline-secondary"
+                                        data-remove-foreign
+                                    >
+                                        Remove
+                                    </button>
+
+                                </div>
+
+                                <div class="operating-location-body">
+
+                                    <?php foreach (pboForeignLocationFields() as $field => $label): ?>
+
+                                        <div class="form-group">
+
+                                            <label><?= e($label) ?><?php if ($field === 'country'): ?>
+                                                <span class="required">*</span>
+                                            <?php endif; ?></label>
+
+                                            <input
+                                                type="<?= $field === 'email' ? 'email' : 'text' ?>"
+                                                name="foreign_locations[<?= (int) $index ?>][<?= e($field) ?>]"
+                                                value="<?= e((string) ($foreignLocation[$field] ?? '')) ?>"
+                                                <?= $field === 'country' ? 'list="country-list"' : '' ?>
+                                            >
+
+                                        </div>
+
+                                    <?php endforeach; ?>
+
+                                </div>
+
+                            </div>
+
+                        <?php endforeach; ?>
+
+                    </div>
+
+                    <button
+                        type="button"
+                        class="btn btn-secondary"
+                        id="add-foreign-location"
+                    >
+                        + Add a country
+                    </button>
+
+                    <p class="form-help">
+                        Name the country, and any office details you have.
+                        Only the country is required.
                     </p>
 
                 </div>
 
             </div>
 
-            <div class="form-row">
-
-                <div class="form-group">
-
-                    <label for="parent_organization_name">
-
-                        Parent Organization Name
-
-                        <span class="required">*</span>
-
-                    </label>
-
-                    <input
-                        type="text"
-                        id="parent_organization_name"
-                        name="parent_organization_name"
-                        value="<?= old(
-                            $form,
-                            'parent_organization_name'
-                        ) ?>"
-                        data-international-required="true"
-                    >
-
-                </div>
-
-
-                <div class="form-group">
-
-                    <label for="country_of_origin">
-
-                        Country of Origin
-
-                        <span class="required">*</span>
-
-                    </label>
-
-                    <input
-                        type="text"
-                        id="country_of_origin"
-                        name="country_of_origin"
-                        value="<?= old(
-                            $form,
-                            'country_of_origin'
-                        ) ?>"
-                        data-international-required="true"
-                    >
-
-                </div>
-
-            </div>
-
-
-            <div class="form-group">
-
-                <label for="registration_number">
-
-                    Registration Number
-
-                    <span class="required">*</span>
-
-                </label>
-
-                <input
-                    type="text"
-                    id="registration_number"
-                    name="registration_number"
-                    value="<?= old(
-                        $form,
-                        'registration_number'
-                    ) ?>"
-                    data-international-required="true"
-                >
-
-            </div>
-
-
-            <div class="form-group">
-
-                <label for="parent_physical_address">
-
-                    Parent Physical Address
-
-                    <span class="required">*</span>
-
-                </label>
-
-                <input
-                    type="text"
-                    id="parent_physical_address"
-                    name="parent_physical_address"
-                    value="<?= old(
-                        $form,
-                        'parent_physical_address'
-                    ) ?>"
-                    data-international-required="true"
-                >
-
-            </div>
-
-
-            <div class="form-row">
-
-                <div class="form-group">
-
-                    <label for="parent_postal_address">
-
-                        Parent Postal Address
-
-                        <span class="required">*</span>
-
-                    </label>
-
-                    <input
-                        type="text"
-                        id="parent_postal_address"
-                        name="parent_postal_address"
-                        value="<?= old(
-                            $form,
-                            'parent_postal_address'
-                        ) ?>"
-                        data-international-required="true"
-                    >
-
-                </div>
-
-
-                <div class="form-group">
-
-                    <label for="parent_postal_code">
-
-                        Parent Postal Code
-
-                        <span class="required">*</span>
-
-                    </label>
-
-                    <input
-                        type="text"
-                        id="parent_postal_code"
-                        name="parent_postal_code"
-                        value="<?= old(
-                            $form,
-                            'parent_postal_code'
-                        ) ?>"
-                        data-international-required="true"
-                    >
-
-                </div>
-
-            </div>
-
-
-            <div class="form-row">
-
-                <div class="form-group">
-
-                    <label for="parent_phone_number">
-
-                        Parent Phone Number
-
-                        <span class="required">*</span>
-
-                    </label>
-
-                    <input
-                        type="tel"
-                        id="parent_phone_number"
-                        name="parent_phone_number"
-                        value="<?= old(
-                            $form,
-                            'parent_phone_number'
-                        ) ?>"
-                        data-international-required="true"
-                    >
-
-                </div>
-
-
-                <div class="form-group">
-
-                    <label for="parent_email">
-
-                        Parent Email
-
-                        <span class="required">*</span>
-
-                    </label>
-
-                    <input
-                        type="email"
-                        id="parent_email"
-                        name="parent_email"
-                        value="<?= old(
-                            $form,
-                            'parent_email'
-                        ) ?>"
-                        data-international-required="true"
-                    >
-
-                </div>
-
-            </div>
-
-
-            <div class="form-row">
-
-                <div class="form-group">
-
-                    <label for="contact_person_name">
-
-                        Contact Person Name
-
-                        <span class="required">*</span>
-
-                    </label>
-
-                    <input
-                        type="text"
-                        id="contact_person_name"
-                        name="contact_person_name"
-                        value="<?= old(
-                            $form,
-                            'contact_person_name'
-                        ) ?>"
-                        data-international-required="true"
-                    >
-
-                </div>
-
-
-                <div class="form-group">
-
-                    <label for="contact_person_phone">
-
-                        Contact Person Phone
-
-                        <span class="required">*</span>
-
-                    </label>
-
-                    <input
-                        type="tel"
-                        id="contact_person_phone"
-                        name="contact_person_phone"
-                        value="<?= old(
-                            $form,
-                            'contact_person_phone'
-                        ) ?>"
-                        data-international-required="true"
-                    >
-
-                </div>
-
-            </div>
-
-
-            <div class="form-group">
-
-                <label for="contact_person_email">
-
-                    Contact Person Email
-
-                    <span class="required">*</span>
-
-                </label>
-
-                <input
-                    type="email"
-                    id="contact_person_email"
-                    name="contact_person_email"
-                    value="<?= old(
-                        $form,
-                        'contact_person_email'
-                    ) ?>"
-                    data-international-required="true"
-                >
-
-            </div>
-
         </section>
+
+
 
 
         <!-- ==========================================================
@@ -2538,6 +2896,228 @@ require_once __DIR__ . '/../includes/header.php';
     |--------------------------------------------------------------------------
     */
 
+    /*
+    |--------------------------------------------------------------------------
+    | Where is the head office?
+    |--------------------------------------------------------------------------
+    |
+    | Asked only of an international organization, and the answer decides
+    | which card they fill in:
+    |
+    |   in Kenya  -> the ordinary Kenyan head office card
+    |   abroad    -> the overseas card in its place
+    |
+    | Areas of operation stay visible either way: they belong to the
+    | organization, not to where its head office happens to be.
+    |
+    | The server decides this too, in includes/organization-reach.php.
+    | This is only so the page follows along as the radio is clicked.
+    */
+
+    function headquartersAnswer() {
+
+        const chosen = document.querySelector(
+            'input[name="headquarters_in_kenya"]:checked'
+        );
+
+        return chosen ? chosen.value : '';
+    }
+
+
+    function updateHeadOfficeCards() {
+
+        const type = getRegistrationType();
+        const international = type === 'international';
+        const answer = headquartersAnswer();
+
+        /* Only an international organization is asked. */
+        const questionSection =
+            document.querySelector('[data-headquarters-question]');
+
+        if (questionSection) {
+            questionSection.style.display = international ? 'block' : 'none';
+        }
+
+        /*
+        | A national organization is in Kenya by definition. An
+        | international one that has not answered yet sees neither card,
+        | so the question is the obvious next thing to deal with.
+        */
+        const abroad = international && answer === '0';
+        const showKenyan = !international || answer === '1';
+
+        const kenyanBlock =
+            document.querySelector('[data-kenyan-head-office]');
+
+        if (kenyanBlock) {
+            kenyanBlock.style.display = showKenyan ? 'block' : 'none';
+        }
+
+        if (internationalSection) {
+            internationalSection.style.display = abroad ? 'block' : 'none';
+        }
+
+        /*
+        | A hidden required field blocks submission with a message the
+        | staff member cannot see, so required follows visibility.
+        */
+        if (kenyanBlock) {
+            kenyanBlock
+                .querySelectorAll('[data-kenyan-required="true"]')
+                .forEach(function (field) {
+                    field.required = showKenyan;
+                });
+        }
+
+        document
+            .querySelectorAll('[data-international-required="true"]')
+            .forEach(function (field) {
+                field.required = abroad;
+            });
+    }
+
+
+    document
+        .querySelectorAll('input[name="headquarters_in_kenya"]')
+        .forEach(function (radio) {
+            radio.addEventListener('change', updateHeadOfficeCards);
+        });
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Areas of operation outside Kenya
+    |--------------------------------------------------------------------------
+    */
+
+    const foreignBody = document.getElementById('foreign-locations-body');
+    const foreignCards = document.getElementById('foreign-location-cards');
+    const addForeign = document.getElementById('add-foreign-location');
+
+    const foreignFields = <?= json_encode(
+        pboForeignLocationFields(),
+        JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP
+    ) ?>;
+
+    function updateForeignVisibility() {
+
+        const chosen = document.querySelector(
+            'input[name="operates_abroad"]:checked'
+        );
+
+        const yes = chosen && chosen.value === 'yes';
+
+        if (foreignBody) {
+            foreignBody.style.display = yes ? 'block' : 'none';
+        }
+
+        /* Offer an empty card straight away rather than a bare button. */
+        if (yes && foreignCards && foreignCards.children.length === 0) {
+            addForeignCard();
+        }
+    }
+
+    function renumberForeignCards() {
+
+        if (!foreignCards) {
+            return;
+        }
+
+        Array.prototype.forEach.call(
+            foreignCards.children,
+            function (card, index) {
+
+                const heading = card.querySelector('strong');
+
+                if (heading) {
+                    heading.textContent = 'Country ' + (index + 1);
+                }
+
+                card.querySelectorAll('input').forEach(function (field) {
+
+                    const key = field.getAttribute('data-foreign-field');
+
+                    if (key) {
+                        field.name = 'foreign_locations[' + index + '][' + key + ']';
+                    }
+                });
+            }
+        );
+    }
+
+    function addForeignCard() {
+
+        if (!foreignCards) {
+            return;
+        }
+
+        const card = document.createElement('div');
+        card.className = 'operating-location-block';
+        card.setAttribute('data-foreign-card', '');
+
+        let html =
+            '<div class="operating-location-header">'
+            + '<strong>Country</strong>'
+            + '<button type="button" class="btn btn-sm btn-outline-secondary" '
+            + 'data-remove-foreign>Remove</button>'
+            + '</div><div class="operating-location-body">';
+
+        Object.keys(foreignFields).forEach(function (key) {
+            html +=
+                '<div class="form-group"><label>'
+                + foreignFields[key]
+                + (key === 'country' ? ' <span class="required">*</span>' : '')
+                + '</label><input type="'
+                + (key === 'email' ? 'email' : 'text')
+                + '" data-foreign-field="' + key + '"'
+                + (key === 'country' ? ' list="country-list"' : '')
+                + '></div>';
+        });
+
+        card.innerHTML = html + '</div>';
+
+        foreignCards.appendChild(card);
+        renumberForeignCards();
+    }
+
+    /* The cards rendered by PHP need the attribute the rebuild relies on. */
+    if (foreignCards) {
+        foreignCards.querySelectorAll('input[name]').forEach(function (field) {
+            const match = field.name.match(/\[([a-z_]+)\]$/);
+
+            if (match) {
+                field.setAttribute('data-foreign-field', match[1]);
+            }
+        });
+    }
+
+    if (addForeign) {
+        addForeign.addEventListener('click', addForeignCard);
+    }
+
+    document.addEventListener('click', function (event) {
+
+        if (!event.target.closest('[data-remove-foreign]')) {
+            return;
+        }
+
+        const card = event.target.closest('[data-foreign-card]');
+
+        if (card) {
+            card.remove();
+            renumberForeignCards();
+        }
+    });
+
+    document
+        .querySelectorAll('input[name="operates_abroad"]')
+        .forEach(function (radio) {
+            radio.addEventListener('change', updateForeignVisibility);
+        });
+
+    updateForeignVisibility();
+
+
     function updateRegistrationType() {
 
         const type =
@@ -2550,14 +3130,7 @@ require_once __DIR__ . '/../includes/header.php';
             type === 'national';
 
 
-        if (internationalSection) {
-
-            internationalSection.style.display =
-                international
-                    ? 'block'
-                    : 'none';
-
-        }
+        updateHeadOfficeCards();
 
 
         /*
@@ -2569,19 +3142,13 @@ require_once __DIR__ . '/../includes/header.php';
         }
 
 
-        document
-            .querySelectorAll(
-                '[data-international-required="true"]'
-            )
-            .forEach(
-                function (field) {
-
-                    field.required =
-                        international;
-
-                }
-            );
-
+        /*
+        | The overseas fields are required only when the head office is
+        | actually abroad, which updateHeadOfficeCards() above decides.
+        | A second loop here setting them from the type alone would undo
+        | that and demand overseas details of an international
+        | organization whose head office is in Kenya.
+        */
 
         updateOtherLocationsVisibility();
 
@@ -3244,6 +3811,25 @@ window.KENYA_LOCATIONS = <?= json_encode(
     JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP
 ) ?>;
 </script>
+
+<!-- Suggestions for the Country fields. Free text underneath: the list
+     will never cover everywhere, and a country it misses must still be
+     enterable. -->
+<datalist id="country-list">
+    <?php foreach ([
+        'Uganda', 'Tanzania', 'Rwanda', 'Burundi', 'South Sudan', 'Somalia',
+        'Ethiopia', 'Democratic Republic of the Congo', 'Nigeria', 'Ghana',
+        'South Africa', 'Egypt', 'Morocco',
+        'United Kingdom', 'Ireland', 'France', 'Germany', 'Netherlands',
+        'Belgium', 'Switzerland', 'Sweden', 'Norway', 'Denmark', 'Finland',
+        'Italy', 'Spain', 'Portugal',
+        'United States of America', 'Canada', 'Brazil',
+        'India', 'China', 'Japan', 'Australia', 'New Zealand',
+        'United Arab Emirates', 'Qatar', 'Saudi Arabia',
+    ] as $countryOption): ?>
+        <option value="<?= e($countryOption) ?>"></option>
+    <?php endforeach; ?>
+</datalist>
 
 <script src="/pbo-portal/assets/js/location-suggest.js"></script>
 
