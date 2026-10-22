@@ -1046,6 +1046,15 @@ foreach ([
     'beneficiary_scope' => 'section_of_public',
     'operates_abroad' => 'yes',
     'registration_date' => '2019-03-14',
+
+    /*
+     * The officials page posts back the filename of a signature already
+     * uploaded, so re-saving the page does not need the file again.
+     * Raised to capitals it no longer matched the file on disk, and on
+     * Linux the signature image was lost from the record.
+     */
+    'existing_signature' => 'chairperson-jane-wanjiru-a1b2c3d4e5f6.png',
+    'signature' => 'treasurer-peter-kamau-9f8e7d6c5b4a.png',
 ] as $field => $value) {
     check('a code field keeps its value: ' . $field,
         pboStoredCase($field, $value) === $value,

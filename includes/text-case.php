@@ -34,14 +34,25 @@ declare(strict_types=1);
 
 
 /**
- * Fields that hold a code rather than text a person reads.
+ * Fields that hold a code or a filename, not text a person reads.
  *
- * These are compared by the program against fixed values, so raising
- * their case breaks the comparison rather than changing how anything
- * looks. "national" became "NATIONAL" and every save on the
- * Organization page was refused with "Please select the Type of
- * Organization", because the box had been filled in correctly and the
- * value no longer matched what the check was looking for.
+ * Nothing here is displayed as words. Each one is either compared by the
+ * program against a fixed value or used to find something on disk, so
+ * raising its case breaks it rather than changing how anything looks.
+ *
+ * Two of these were found the hard way:
+ *
+ *   registration_type - "national" was stored as "NATIONAL", the check
+ *   looking for "national" stopped matching, and every save on the
+ *   Organization page was refused with "Please select the Type of
+ *   Organization" while the box was correctly filled in. The form could
+ *   not be saved at all.
+ *
+ *   existing_signature - the officials page posts back the filename of a
+ *   signature already uploaded, so that re-saving the page does not need
+ *   the file again. Raised to capitals it no longer matched the file on
+ *   disk, and on Linux, where filenames are case-sensitive, the
+ *   signature image was lost from the record.
  *
  * Matched on the whole field name, not a substring: a code field is a
  * specific field, and guessing from a fragment of a name is what would
@@ -52,13 +63,15 @@ function pboFieldIsCode(string $field): bool
     return in_array(strtolower($field), [
         'registration_type',      /* national | international */
         'headquarters_in_kenya',  /* 1 | 0 */
-        'beneficiary_scope',      /* public | section */
+        'beneficiary_scope',      /* public | section_of_public */
         'status',
         'form_action',
         'wizard_destination',
         'operates_abroad',        /* yes | no */
         'operates_other_locations',
         'registration_date',      /* a date, not a word */
+        'signature',              /* a filename on disk */
+        'existing_signature',     /* the same filename, posted back */
     ], true);
 }
 
