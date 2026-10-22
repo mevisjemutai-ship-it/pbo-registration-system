@@ -3816,17 +3816,7 @@ window.KENYA_LOCATIONS = <?= json_encode(
      will never cover everywhere, and a country it misses must still be
      enterable. -->
 <datalist id="country-list">
-    <?php foreach ([
-        'Uganda', 'Tanzania', 'Rwanda', 'Burundi', 'South Sudan', 'Somalia',
-        'Ethiopia', 'Democratic Republic of the Congo', 'Nigeria', 'Ghana',
-        'South Africa', 'Egypt', 'Morocco',
-        'United Kingdom', 'Ireland', 'France', 'Germany', 'Netherlands',
-        'Belgium', 'Switzerland', 'Sweden', 'Norway', 'Denmark', 'Finland',
-        'Italy', 'Spain', 'Portugal',
-        'United States of America', 'Canada', 'Brazil',
-        'India', 'China', 'Japan', 'Australia', 'New Zealand',
-        'United Arab Emirates', 'Qatar', 'Saudi Arabia',
-    ] as $countryOption): ?>
+    <?php foreach (pboCountrySuggestions() as $countryOption): ?>
         <option value="<?= e($countryOption) ?>"></option>
     <?php endforeach; ?>
 </datalist>

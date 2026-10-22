@@ -492,15 +492,43 @@ function pboAuditItemText(array $item): string
    Save
    ------------------------------------------------------------------ */
 
+/**
+ * Which of the audit columns this database actually has.
+ *
+ * Asks for each column rather than for a list of them. SHOW COLUMNS is
+ * MySQL's alone and threw outright anywhere else - including in the test
+ * harness, which is how a save could not be checked end to end. The rest
+ * of the portal already probes with SELECT ... LIMIT 0, in
+ * official-rules.php and organization-reach.php, so this now matches.
+ *
+ * @return array<string, true>
+ */
 function pboAuditColumns(PDO $db): array
 {
     static $columns = null;
 
-    if ($columns === null) {
-        $columns = [];
+    if ($columns !== null) {
+        return $columns;
+    }
 
-        foreach ($db->query('SHOW COLUMNS FROM application_audit_log')->fetchAll(PDO::FETCH_ASSOC) as $column) {
-            $columns[$column['Field']] = true;
+    $columns = [];
+
+    foreach ([
+        'application_id',
+        'user_id',
+        'action',
+        'description',
+        'changes',
+        'ip_address',
+    ] as $column) {
+        try {
+            if ($db->query(
+                'SELECT ' . $column . ' FROM application_audit_log LIMIT 0'
+            ) !== false) {
+                $columns[$column] = true;
+            }
+        } catch (PDOException $exception) {
+            /* Column is not there; sql/audit-trail.sql has not been run. */
         }
     }
 

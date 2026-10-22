@@ -179,6 +179,32 @@ function pboForeignLocationFields(): array
 }
 
 
+/**
+ * Countries suggested in the Country fields.
+ *
+ * A suggestion list, not a validation list: it will never cover
+ * everywhere, so the inputs stay free text and a country this misses is
+ * still enterable. Kenya's neighbours and the places Kenyan
+ * organizations most often work, then the rest by region.
+ *
+ * @return string[]
+ */
+function pboCountrySuggestions(): array
+{
+    return [
+        'Uganda', 'Tanzania', 'Rwanda', 'Burundi', 'South Sudan', 'Somalia',
+        'Ethiopia', 'Democratic Republic of the Congo', 'Nigeria', 'Ghana',
+        'South Africa', 'Egypt', 'Morocco',
+        'United Kingdom', 'Ireland', 'France', 'Germany', 'Netherlands',
+        'Belgium', 'Switzerland', 'Sweden', 'Norway', 'Denmark', 'Finland',
+        'Italy', 'Spain', 'Portugal',
+        'United States of America', 'Canada', 'Brazil',
+        'India', 'China', 'Japan', 'Australia', 'New Zealand',
+        'United Arab Emirates', 'Qatar', 'Saudi Arabia',
+    ];
+}
+
+
 /** Just the column names, for building queries. */
 function pboForeignLocationColumns(): array
 {

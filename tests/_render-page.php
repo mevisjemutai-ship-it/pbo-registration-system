@@ -50,9 +50,53 @@ $_SESSION['role'] = 'admin';
 $_SESSION['full_name'] = 'Test Officer';
 $_SESSION['must_change_password'] = false;
 
+/*
+| Extra session values, as JSON. The edit pages need an
+| admin_edit_authorization in the session before they will show the form
+| rather than the authorization wall, so a test has to be able to put one
+| there.
+*/
+$extraSession = (string) getenv('PBO_TEST_SESSION');
+
+if ($extraSession !== '') {
+
+    $decoded = json_decode($extraSession, true);
+
+    if (!is_array($decoded)) {
+        fwrite(STDERR, "PBO_TEST_SESSION is not valid JSON.\n");
+        exit(2);
+    }
+
+    foreach ($decoded as $key => $value) {
+        $_SESSION[$key] = $value;
+    }
+}
+
 parse_str((string) getenv('PBO_TEST_QUERY'), $_GET);
 
-$_SERVER['REQUEST_METHOD'] = 'GET';
+/*
+| A posted body, as JSON, so a test can exercise a save and not only a
+| render. The save is where a record can be damaged, so it is the part
+| most worth checking.
+*/
+$body = (string) getenv('PBO_TEST_POST');
+
+if ($body !== '') {
+
+    $decoded = json_decode($body, true);
+
+    if (!is_array($decoded)) {
+        fwrite(STDERR, "PBO_TEST_POST is not valid JSON.\n");
+        exit(2);
+    }
+
+    $_POST = $decoded;
+    $_SERVER['REQUEST_METHOD'] = 'POST';
+
+} else {
+    $_SERVER['REQUEST_METHOD'] = 'GET';
+}
+
 $_SERVER['HTTP_HOST'] = 'localhost';
 $_SERVER['REQUEST_URI'] = '/pbo-portal/' . $page;
 

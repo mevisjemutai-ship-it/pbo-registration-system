@@ -34,6 +34,36 @@ declare(strict_types=1);
 
 
 /**
+ * Fields that hold a code rather than text a person reads.
+ *
+ * These are compared by the program against fixed values, so raising
+ * their case breaks the comparison rather than changing how anything
+ * looks. "national" became "NATIONAL" and every save on the
+ * Organization page was refused with "Please select the Type of
+ * Organization", because the box had been filled in correctly and the
+ * value no longer matched what the check was looking for.
+ *
+ * Matched on the whole field name, not a substring: a code field is a
+ * specific field, and guessing from a fragment of a name is what would
+ * quietly exempt somebody's actual data from the house rule.
+ */
+function pboFieldIsCode(string $field): bool
+{
+    return in_array(strtolower($field), [
+        'registration_type',      /* national | international */
+        'headquarters_in_kenya',  /* 1 | 0 */
+        'beneficiary_scope',      /* public | section */
+        'status',
+        'form_action',
+        'wizard_destination',
+        'operates_abroad',        /* yes | no */
+        'operates_other_locations',
+        'registration_date',      /* a date, not a word */
+    ], true);
+}
+
+
+/**
  * Fields that keep the case they were typed in.
  *
  * Matched on the field name, so it works the same whether the value
@@ -41,6 +71,10 @@ declare(strict_types=1);
  */
 function pboFieldKeepsCase(string $field): bool
 {
+    if (pboFieldIsCode($field)) {
+        return true;
+    }
+
     $field = strtolower($field);
 
     foreach (['email', 'password', 'url', 'website', 'token', 'csrf'] as $needle) {

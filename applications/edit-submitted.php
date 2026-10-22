@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/application-validation.php';
+require_once __DIR__ . '/../includes/organization-reach.php';
 require_once __DIR__ . '/../includes/official-rules.php';
 require_once __DIR__ . '/../includes/text-case.php';
 require_once __DIR__ . '/../includes/kenya-locations.php';
@@ -40,16 +41,20 @@ $hasTaxColumns = officialTaxColumnsExist($connection);
 |--------------------------------------------------------------------------
 */
 
-$applicationId = filter_input(
-    INPUT_GET,
-    'id',
+/*
+| filter_var on $_GET / $_POST rather than filter_input: identical for a
+| real request, and it lets this page be rendered by a test without a web
+| server, which is how the head office sections are checked. The same
+| change was made to export-excel.php, view.php and review.php.
+*/
+$applicationId = filter_var(
+    $_GET['id'] ?? null,
     FILTER_VALIDATE_INT
 );
 
 if (!$applicationId) {
-    $applicationId = filter_input(
-        INPUT_POST,
-        'application_id',
+    $applicationId = filter_var(
+        $_POST['application_id'] ?? null,
         FILTER_VALIDATE_INT
     );
 }
@@ -155,6 +160,14 @@ if (!$application) {
     http_response_code(404);
     exit('Submitted PBO record was not found.');
 }
+
+/*
+| Is the headquarters question column there yet? Checked rather than
+| assumed, so this page keeps working on a server where
+| database/add_operations_outside_kenya.sql has not been applied - it
+| simply cannot record the answer until it has.
+*/
+$hasHeadquartersColumn = pboHeadquartersColumnAvailable($connection);
 
 /*
 |--------------------------------------------------------------------------
@@ -436,17 +449,8 @@ $operatingLocationsForForm = $operatingLocations;
 
 $stmt = $connection->prepare(
     'SELECT
-        parent_organization_name,
-        country_of_origin,
-        registration_number,
-        parent_physical_address,
-        parent_postal_address,
-        parent_postal_code,
-        parent_phone_number,
-        parent_email,
-        contact_person_name,
-        contact_person_phone,
-        contact_person_email
+        ' . implode(',
+        ', array_keys(pboOverseasFields())) . '
      FROM application_international_details
      WHERE application_id = :id
      ORDER BY id DESC
@@ -458,6 +462,22 @@ $stmt->execute([
 ]);
 
 $international = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+/*
+|--------------------------------------------------------------------------
+| Load areas of operation outside Kenya
+|--------------------------------------------------------------------------
+|
+| Offered to national organizations as much as international ones: a
+| Kenyan organization running a programme in Uganda is an ordinary thing,
+| and until this existed the only place to record where an organization
+| works was a list of the 47 counties.
+|
+*/
+
+$foreignLocations = pboForeignLocations($connection, $applicationId);
+
+$foreignLocationsForForm = $foreignLocations;
 
 /*
 |--------------------------------------------------------------------------
@@ -644,6 +664,19 @@ $form = [
 
     'registration_type' =>
         (string) $application['registration_type'],
+
+    /*
+    | Where the head office is.
+    |
+    | Never left blank here, unlike the entry form: this page edits a
+    | record that already exists, and every page in the portal already
+    | reads an unanswered international record as based abroad. Showing
+    | neither card would hide overseas details the record actually holds
+    | from the person editing it. So it starts on the reading in force
+    | and saving writes that answer down explicitly.
+    */
+    'headquarters_in_kenya' =>
+        pboHeadquartersInKenya($application) ? '1' : '0',
 ];
 
 foreach (
@@ -664,21 +697,11 @@ foreach (
         (string) ($address[$field] ?? '');
 }
 
-foreach (
-    [
-        'parent_organization_name',
-        'country_of_origin',
-        'registration_number',
-        'parent_physical_address',
-        'parent_postal_address',
-        'parent_postal_code',
-        'parent_phone_number',
-        'parent_email',
-        'contact_person_name',
-        'contact_person_phone',
-        'contact_person_email',
-    ] as $field
-) {
+/*
+| The overseas fields, from the shared map rather than a list repeated
+| here - a column added or renamed there reaches this page on its own.
+*/
+foreach (array_keys(pboOverseasFields()) as $field) {
 
     $form[$field] =
         (string) ($international[$field] ?? '');
@@ -744,6 +767,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
      | Other Areas of Operation
      |--------------------------------------------------------------------------
      */
+
+    /*
+    | Where the head office is. A national organization is in Kenya by
+    | definition, so the answer is set rather than left to whatever the
+    | hidden radios happened to hold.
+    */
+    $form['headquarters_in_kenya'] =
+        in_array($_POST['headquarters_in_kenya'] ?? '', ['0', '1'], true)
+            ? (string) $_POST['headquarters_in_kenya']
+            : '';
+
+    if ($form['registration_type'] === 'national') {
+        $form['headquarters_in_kenya'] = '1';
+    }
+
+    /*
+    | Areas of operation outside Kenya. A card with no country named is
+    | an empty one somebody added and thought better of, so it is dropped
+    | rather than reported as a mistake.
+    */
+    $operatesAbroad =
+        ($_POST['operates_abroad'] ?? 'no') === 'yes' ? 'yes' : 'no';
+
+    $normalizedForeignLocations = $operatesAbroad === 'yes'
+        ? pboNormaliseForeignLocations($_POST['foreign_locations'] ?? [])
+        : [];
+
+    if ($normalizedForeignLocations === []) {
+        $operatesAbroad = 'no';
+    }
+
+    $foreignLocationsForForm = $normalizedForeignLocations;
 
     $postedOperatingLocations =
         $_POST['operating_locations'] ?? [];
@@ -1163,29 +1218,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
      * so older submitted records with no town value can still be
      * edited and saved safely.
      */
-    foreach (
-        [
-            'county' =>
-                'County',
-
-            'physical_address' =>
-                'Physical Address',
-
-            'postal_address' =>
-                'Postal Address',
-
-            'phone_number' =>
-                'Organization Phone Number',
-
-            'email' =>
-                'Organization Email',
-        ] as $field => $label
+    /*
+     * An international organization has to say where its head office is,
+     * because the answer decides which card has to be complete.
+     */
+    if (
+        $form['registration_type'] === 'international'
+        && !in_array($form['headquarters_in_kenya'], ['0', '1'], true)
     ) {
+        $errors[] = 'Say whether the head office is in Kenya.';
+    }
 
-        if ($form[$field] === '') {
+    $headOfficeAbroad = pboUsesOverseasHeadOffice([
+        'registration_type' => $form['registration_type'],
+        'headquarters_in_kenya' => $form['headquarters_in_kenya'],
+    ]);
 
-            $errors[] =
-                $label . ' is required.';
+    if (!$headOfficeAbroad) {
+
+        foreach (
+            [
+                'county' =>
+                    'County',
+
+                'physical_address' =>
+                    'Physical Address',
+
+                'postal_address' =>
+                    'Postal Address',
+
+                'phone_number' =>
+                    'Organization Phone Number',
+
+                'email' =>
+                    'Organization Email',
+            ] as $field => $label
+        ) {
+
+            if ($form[$field] === '') {
+
+                $errors[] =
+                    $label . ' is required.';
+            }
         }
     }
 
@@ -1202,48 +1276,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     /*
-     * International details.
+     * The head office abroad, asked for only when that is where it is.
+     *
+     * This used to be asked of every international organization, so one
+     * whose head office is in Kenya - and many are - could not be saved
+     * until somebody copied its Kenyan address into these eleven
+     * fields. The register then said a Kenyan organization was its own
+     * foreign parent.
+     *
+     * Labels from pboOverseasFields(), the same place the form takes
+     * them from, so a message can never name a field by a label the
+     * person cannot see on screen.
      */
-    if (
-        $form['registration_type'] === 'international'
-    ) {
+    if ($headOfficeAbroad) {
 
-        foreach (
-            [
-                'parent_organization_name' =>
-                    'Name of Parent Organization',
+        $overseasLabels = pboOverseasFields();
 
-                'country_of_origin' =>
-                    'Country where the Parent Organization is registered',
-
-                'registration_number' =>
-                    'Public Benefit / Charity Registration Number',
-
-                'parent_physical_address' =>
-                    'Parent Organization Physical Address',
-
-                'parent_postal_address' =>
-                    'Parent Organization Postal Address',
-
-                'parent_postal_code' =>
-                    'Parent Organization Postal Code',
-
-                'parent_phone_number' =>
-                    'Parent Organization Phone Number',
-
-                'parent_email' =>
-                    'Email of Parent Organization',
-
-                'contact_person_name' =>
-                    'Contact Person Name',
-
-                'contact_person_phone' =>
-                    'Contact Person Phone Number',
-
-                'contact_person_email' =>
-                    'Contact Person Email Address',
-            ] as $field => $label
-        ) {
+        foreach ($overseasLabels as $field => $label) {
 
             if ($form[$field] === '') {
 
@@ -1252,15 +1301,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        foreach (
-            [
-                'parent_email' =>
-                    'Parent Organization email',
-
-                'contact_person_email' =>
-                    'Parent Organization contact person email',
-            ] as $field => $label
-        ) {
+        foreach (['parent_email', 'contact_person_email'] as $field) {
 
             if (
                 $form[$field] !== '' &&
@@ -1271,9 +1312,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ) {
 
                 $errors[] =
-                    'Enter a valid ' . $label . '.';
+                    'Enter a valid ' . lcfirst($overseasLabels[$field]) . '.';
             }
         }
+    }
+
+    foreach (pboForeignLocationErrors($normalizedForeignLocations) as $foreignError) {
+        $errors[] = $foreignError;
     }
 
     /*
@@ -1615,6 +1660,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     pbo_registration_number = :pbo_registration_number,
                     registration_date = :registration_date,
                     registration_type = :registration_type,
+                    " . ($hasHeadquartersColumn
+                        ? 'headquarters_in_kenya = :headquarters_in_kenya,'
+                        : '') . "
                     financial_year_start_month = :start_month,
                     financial_year_end_month = :end_month,
                     updated_by = :updated_by
@@ -1622,7 +1670,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                    AND status = 'submitted'"
             );
 
-            $stmt->execute([
+            $parameters = [
                 'pbo_name' =>
                     $form['pbo_name'],
 
@@ -1648,7 +1696,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 'id' =>
                     $applicationId,
-            ]);
+            ];
+
+            if ($hasHeadquartersColumn) {
+                $parameters['headquarters_in_kenya'] =
+                    $form['headquarters_in_kenya'] !== ''
+                        ? (int) $form['headquarters_in_kenya']
+                        : null;
+            }
+
+            $stmt->execute($parameters);
 
             /*
              |--------------------------------------------------------------------------
@@ -1813,9 +1870,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
              |--------------------------------------------------------------------------
              */
 
-            if (
-                $form['registration_type'] === 'international'
-            ) {
+            /*
+             * Stored only when the head office IS abroad. An
+             * international organization based in Kenya has nothing
+             * overseas to record, and the row is removed if it once had
+             * one - otherwise an old copy of its Kenyan address would
+             * sit in the register as its foreign head office forever.
+             */
+            if ($headOfficeAbroad) {
 
                 $stmt = $connection->prepare(
                     'DELETE FROM application_international_details
@@ -1908,6 +1970,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'id' => $applicationId
                 ]);
             }
+
+            /*
+             |--------------------------------------------------------------------------
+             | Areas of operation outside Kenya
+             |--------------------------------------------------------------------------
+             |
+             | Replaced inside the same transaction, as the other child
+             | tables are. Does nothing on a server where the migration
+             | has not been applied.
+             |
+             */
+
+            pboSaveForeignLocations(
+                $connection,
+                $applicationId,
+                $normalizedForeignLocations
+            );
 
             /*
              |--------------------------------------------------------------------------
@@ -3309,10 +3388,118 @@ require_once __DIR__ . '/../includes/header.php';
         </section>
 
         <!-- =========================================================
+             WHERE IS THE HEAD OFFICE?
+
+             Asked only of an international organization, and the answer
+             decides which of the two cards below it fills in. Before
+             this existed, every international record was assumed to have
+             a body abroad, and the ones that did not had the overseas
+             fields filled with their own Kenyan address to get past the
+             page.
+
+             No step number: it is the question that opens step 2, not a
+             step of its own.
+             ========================================================= -->
+
+        <section
+            class="edit-section"
+            data-headquarters-question
+            style="display: <?= $form['registration_type'] === 'international'
+                ? 'block'
+                : 'none' ?>;"
+        >
+
+            <div class="edit-section-header">
+
+                <div>
+
+                    <h2>
+                        <span>Head Office Location</span>
+                    </h2>
+
+                    <p>
+                        Is the organization's head office in Kenya?
+                    </p>
+
+                </div>
+
+            </div>
+
+            <div class="edit-section-body">
+
+                <div
+                    class="row g-3"
+                    role="radiogroup"
+                    aria-label="Is the head office in Kenya?"
+                >
+
+                    <div class="col-md-6">
+
+                        <label class="edit-label">
+
+                            <input
+                                type="radio"
+                                name="headquarters_in_kenya"
+                                value="1"
+                                <?= $form['headquarters_in_kenya'] === '1'
+                                    ? 'checked'
+                                    : '' ?>
+                            >
+
+                            Yes, in Kenya
+
+                        </label>
+
+                    </div>
+
+                    <div class="col-md-6">
+
+                        <label class="edit-label">
+
+                            <input
+                                type="radio"
+                                name="headquarters_in_kenya"
+                                value="0"
+                                <?= $form['headquarters_in_kenya'] === '0'
+                                    ? 'checked'
+                                    : '' ?>
+                            >
+
+                            No, outside Kenya
+
+                        </label>
+
+                    </div>
+
+                    <div class="col-12">
+
+                        <p class="text-muted" style="margin: 0; font-size: 12px;">
+                            Many organizations registered as international
+                            have their head office here and no body abroad.
+                            If that is the case, answer Yes and fill in the
+                            Kenyan address as usual.
+                        </p>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+        </section>
+
+        <!-- =========================================================
              2. HEADQUARTERS / HEAD OFFICE
              ========================================================= -->
 
-        <section class="edit-section">
+        <section
+            class="edit-section"
+            data-kenyan-head-office
+            style="display: <?= pboUsesOverseasHeadOffice([
+                'registration_type' => $form['registration_type'],
+                'headquarters_in_kenya' => $form['headquarters_in_kenya'],
+            ]) ? 'none' : 'block' ?>;"
+        >
 
             <div class="edit-section-header">
 
@@ -3392,6 +3579,15 @@ require_once __DIR__ . '/../includes/header.php';
                                 value="<?= e(
                                     $form[$field]
                                 ) ?>"
+                                <?php
+                                /*
+                                 * data-kenyan-required lets the script
+                                 * drop "required" when the head office is
+                                 * abroad and this card is hidden. A hidden
+                                 * required field blocks the form with a
+                                 * message nobody can see.
+                                 */
+                                ?>
                                 <?= in_array(
                                     $field,
                                     [
@@ -3403,8 +3599,88 @@ require_once __DIR__ . '/../includes/header.php';
                                     ],
                                     true
                                 )
-                                    ? 'required'
+                                    ? 'required data-kenyan-required="true"'
                                     : '' ?>
+                            >
+
+                        </div>
+
+                    <?php endforeach; ?>
+
+                </div>
+
+            </div>
+
+        </section>
+
+        <!-- =========================================================
+             2. HEAD OFFICE OUTSIDE KENYA
+
+             Stands in PLACE of the Kenyan head office card above,
+             never alongside it, which is why it carries the same
+             step number and sits here rather than at the foot of
+             the page.
+             ========================================================= -->
+
+        <section
+            class="edit-section"
+            id="international-section"
+            style="display: <?= pboUsesOverseasHeadOffice([
+                'registration_type' => $form['registration_type'],
+                'headquarters_in_kenya' => $form['headquarters_in_kenya'],
+            ]) ? 'block' : 'none' ?>;"
+        >
+
+            <div class="edit-section-header">
+
+                <div>
+
+                    <h2>
+                        2. <?= e(pboOverseasHeading()) ?>
+                    </h2>
+
+                    <p>
+                        The organization's own head office in the country it
+                        is based in, and the person to contact there. This
+                        stands in place of the Kenyan head office above, not
+                        alongside it.
+                    </p>
+
+                </div>
+
+            </div>
+
+            <div class="edit-section-body">
+
+                <div class="row g-3">
+
+                    <?php
+                    /*
+                     * Labels from pboOverseasFields(). They used to be
+                     * written out here as well as in create.php, review.php
+                     * and both exports, which is how "Country of Origin"
+                     * survived in some of them after being renamed in
+                     * others.
+                     */
+                    ?>
+
+                    <?php foreach (
+                        pboOverseasFields()
+                        as $field => $label
+                    ): ?>
+
+                        <div class="col-md-6">
+
+                            <label class="edit-label">
+                                <?= e($label) ?>
+                            </label>
+
+                            <input
+                                class="form-control"
+                                name="<?= e($field) ?>"
+                                value="<?= e(
+                                    $form[$field]
+                                ) ?>"
                             >
 
                         </div>
@@ -3679,111 +3955,160 @@ require_once __DIR__ . '/../includes/header.php';
                     + Add Operating Location
                 </button>
 
-            </div>
 
-        </section>
+                <!--
+                     Areas of operation OUTSIDE Kenya.
 
-        <!-- =========================================================
-             4. INTERNATIONAL
-             ========================================================= -->
+                     Organizations work in Canada, the United States,
+                     France. The only place to record where an
+                     organization operates was the list of counties above,
+                     so none of that was recorded. Inside this section
+                     rather than a numbered one of its own, because
+                     "Other Areas of Operation" covers both.
+                -->
 
-        <section
-            class="edit-section"
-            id="international-section"
-        >
+                <hr style="margin: 28px 0 20px;">
 
-            <div class="edit-section-header">
+                <h3 style="font-size: 15px; margin: 0 0 6px;">
+                    Areas of Operation Outside Kenya
+                </h3>
 
-                <div>
+                <p class="text-muted" style="font-size: 12px; margin: 0 0 14px;">
+                    Does the organization operate in any country outside
+                    Kenya? Only the country is needed; office details are
+                    optional.
+                </p>
 
-                    <h2>
-                        4. International Organization Details
-                    </h2>
+                <div
+                    class="row g-3"
+                    role="radiogroup"
+                    aria-label="Does the organization operate outside Kenya?"
+                    style="margin-bottom: 14px;"
+                >
 
-                    <p>
-                        Additional parent-organization and contact details
-                        required when the organization type is International.
-                    </p>
+                    <div class="col-md-6">
 
-                </div>
-
-            </div>
-
-            <div class="edit-section-body">
-
-                <div class="row g-3">
-
-                    <?php
-                    $internationalFields = [
-                        [
-                            'parent_organization_name',
-                            'Name of Parent Organization'
-                        ],
-                        [
-                            'country_of_origin',
-                            'Country where Parent Organization is registered'
-                        ],
-                        [
-                            'registration_number',
-                            'Public Benefit / Charity Registration Number'
-                        ],
-                        [
-                            'parent_physical_address',
-                            'Parent Organization Physical Address'
-                        ],
-                        [
-                            'parent_postal_address',
-                            'Parent Organization Postal Address'
-                        ],
-                        [
-                            'parent_postal_code',
-                            'Parent Organization Postal Code'
-                        ],
-                        [
-                            'parent_phone_number',
-                            'Parent Organization Phone Number'
-                        ],
-                        [
-                            'parent_email',
-                            'Parent Organization Email'
-                        ],
-                        [
-                            'contact_person_name',
-                            'Contact Person Name'
-                        ],
-                        [
-                            'contact_person_phone',
-                            'Contact Person Phone Number'
-                        ],
-                        [
-                            'contact_person_email',
-                            'Contact Person Email Address'
-                        ],
-                    ];
-                    ?>
-
-                    <?php foreach (
-                        $internationalFields
-                        as [$field, $label]
-                    ): ?>
-
-                        <div class="col-md-6">
-
-                            <label class="edit-label">
-                                <?= e($label) ?>
-                            </label>
+                        <label class="edit-label">
 
                             <input
-                                class="form-control"
-                                name="<?= e($field) ?>"
-                                value="<?= e(
-                                    $form[$field]
-                                ) ?>"
+                                type="radio"
+                                name="operates_abroad"
+                                value="no"
+                                <?= $foreignLocationsForForm === []
+                                    ? 'checked'
+                                    : '' ?>
                             >
 
-                        </div>
+                            No
 
-                    <?php endforeach; ?>
+                        </label>
+
+                    </div>
+
+                    <div class="col-md-6">
+
+                        <label class="edit-label">
+
+                            <input
+                                type="radio"
+                                name="operates_abroad"
+                                value="yes"
+                                <?= $foreignLocationsForForm !== []
+                                    ? 'checked'
+                                    : '' ?>
+                            >
+
+                            Yes
+
+                        </label>
+
+                    </div>
+
+                </div>
+
+                <div
+                    id="foreign-locations-body"
+                    style="display: <?= $foreignLocationsForForm !== []
+                        ? 'block'
+                        : 'none' ?>;"
+                >
+
+                    <div id="foreign-location-cards">
+
+                        <?php foreach (
+                            $foreignLocationsForForm as $index => $location
+                        ): ?>
+
+                            <div
+                                class="operating-location-card"
+                                data-foreign-card
+                            >
+
+                                <div class="operating-location-head">
+
+                                    <strong>Country <?= (int) $index + 1 ?></strong>
+
+                                    <button
+                                        type="button"
+                                        class="btn btn-sm btn-outline-secondary"
+                                        data-remove-foreign
+                                    >
+                                        Remove
+                                    </button>
+
+                                </div>
+
+                                <div class="row g-3">
+
+                                    <?php foreach (
+                                        pboForeignLocationFields()
+                                        as $field => $label
+                                    ): ?>
+
+                                        <div class="col-md-6">
+
+                                            <label class="edit-label">
+
+                                                <?= e($label) ?>
+
+                                                <?php if ($field === 'country'): ?>
+                                                    <span class="text-danger">*</span>
+                                                <?php endif; ?>
+
+                                            </label>
+
+                                            <input
+                                                class="form-control"
+                                                type="<?= $field === 'email'
+                                                    ? 'email'
+                                                    : 'text' ?>"
+                                                name="foreign_locations[<?= (int) $index ?>][<?= e($field) ?>]"
+                                                data-foreign-field="<?= e($field) ?>"
+                                                value="<?= e((string) ($location[$field] ?? '')) ?>"
+                                                <?= $field === 'country'
+                                                    ? 'list="country-list"'
+                                                    : '' ?>
+                                            >
+
+                                        </div>
+
+                                    <?php endforeach; ?>
+
+                                </div>
+
+                            </div>
+
+                        <?php endforeach; ?>
+
+                    </div>
+
+                    <button
+                        type="button"
+                        class="btn btn-outline-secondary"
+                        id="add-foreign-location"
+                    >
+                        + Add a Country
+                    </button>
 
                 </div>
 
@@ -3791,8 +4116,9 @@ require_once __DIR__ . '/../includes/header.php';
 
         </section>
 
+
         <!-- =========================================================
-             5. OBJECTIVES
+             4. OBJECTIVES
              ========================================================= -->
 
         <section class="edit-section">
@@ -3802,7 +4128,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <div>
 
                     <h2>
-                        5. Public Benefit Purposes
+                        4. Public Benefit Purposes
                     </h2>
 
                     <p>
@@ -3872,7 +4198,7 @@ require_once __DIR__ . '/../includes/header.php';
         </section>
 
         <!-- =========================================================
-             6. BENEFICIARIES
+             5. BENEFICIARIES
              ========================================================= -->
 
         <section class="edit-section">
@@ -3882,7 +4208,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <div>
 
                     <h2>
-                        6. Beneficiaries
+                        5. Beneficiaries
                     </h2>
 
                     <p>
@@ -4019,7 +4345,7 @@ require_once __DIR__ . '/../includes/header.php';
         </section>
 
         <!-- =========================================================
-             7. FINANCIAL YEAR
+             6. FINANCIAL YEAR
              ========================================================= -->
 
         <section class="edit-section">
@@ -4029,7 +4355,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <div>
 
                     <h2>
-                        7. Financial Year
+                        6. Financial Year
                     </h2>
 
                     <p>
@@ -4124,7 +4450,7 @@ require_once __DIR__ . '/../includes/header.php';
         </section>
 
         <!-- =========================================================
-             8. OFFICIALS
+             7. OFFICIALS
              ========================================================= -->
 
         <section class="edit-section">
@@ -4134,7 +4460,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <div>
 
                     <h2>
-                        8. Officials & Directors
+                        7. Officials & Directors
                     </h2>
 
                     <p>
@@ -4404,6 +4730,16 @@ require_once __DIR__ . '/../includes/header.php';
 
 </main>
 
+<!-- Suggestions for the Country fields. Free text underneath: the list
+     will never cover everywhere, and a country it misses must still be
+     enterable. -->
+<datalist id="country-list">
+    <?php foreach (pboCountrySuggestions() as $countryName): ?>
+        <option value="<?= e($countryName) ?>"></option>
+    <?php endforeach; ?>
+</datalist>
+
+
 <script>
 (function () {
 
@@ -4412,6 +4748,12 @@ require_once __DIR__ . '/../includes/header.php';
 
     const internationalSection =
         document.getElementById('international-section');
+
+    document
+        .querySelectorAll('input[name="headquarters_in_kenya"]')
+        .forEach(function (radio) {
+            radio.addEventListener('change', toggleInternational);
+        });
 
     const beneficiaryScope =
         document.getElementById('beneficiary_scope');
@@ -4443,14 +4785,197 @@ require_once __DIR__ . '/../includes/header.php';
      |--------------------------------------------------------------------------
      */
 
+    /*
+     | Which head office card is shown. The server works this out too, in
+     | includes/organization-reach.php; this is so the page follows along
+     | as the radio is clicked.
+     |
+     |   national                      the Kenyan card, no question asked
+     |   international, in Kenya       the Kenyan card
+     |   international, abroad         the overseas card in its place
+     |   international, not answered   neither, so the question is the
+     |                                 obvious next thing to deal with
+     */
+
+    /*
+     |--------------------------------------------------------------------------
+     | Areas of operation outside Kenya
+     |--------------------------------------------------------------------------
+     */
+
+    const foreignBody =
+        document.getElementById('foreign-locations-body');
+
+    const foreignCards =
+        document.getElementById('foreign-location-cards');
+
+    const addForeign =
+        document.getElementById('add-foreign-location');
+
+    const foreignFields = <?= json_encode(
+        pboForeignLocationFields(),
+        JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP
+    ) ?>;
+
+    function renumberForeignCards() {
+
+        if (!foreignCards) {
+            return;
+        }
+
+        Array.prototype.forEach.call(
+            foreignCards.children,
+            function (card, index) {
+
+                const heading = card.querySelector('strong');
+
+                if (heading) {
+                    heading.textContent = 'Country ' + (index + 1);
+                }
+
+                card.querySelectorAll('input').forEach(function (field) {
+
+                    const key = field.getAttribute('data-foreign-field');
+
+                    if (key) {
+                        field.name =
+                            'foreign_locations[' + index + '][' + key + ']';
+                    }
+                });
+            }
+        );
+    }
+
+    function addForeignCard() {
+
+        if (!foreignCards) {
+            return;
+        }
+
+        const card = document.createElement('div');
+        card.className = 'operating-location-card';
+        card.setAttribute('data-foreign-card', '');
+
+        let html =
+            '<div class="operating-location-head">'
+            + '<strong>Country</strong>'
+            + '<button type="button" class="btn btn-sm btn-outline-secondary" '
+            + 'data-remove-foreign>Remove</button>'
+            + '</div><div class="row g-3">';
+
+        Object.keys(foreignFields).forEach(function (key) {
+            html +=
+                '<div class="col-md-6"><label class="edit-label">'
+                + foreignFields[key]
+                + (key === 'country'
+                    ? ' <span class="text-danger">*</span>'
+                    : '')
+                + '</label><input class="form-control" type="'
+                + (key === 'email' ? 'email' : 'text')
+                + '" data-foreign-field="' + key + '"'
+                + (key === 'country' ? ' list="country-list"' : '')
+                + '></div>';
+        });
+
+        card.innerHTML = html + '</div>';
+
+        foreignCards.appendChild(card);
+        renumberForeignCards();
+    }
+
+    function updateForeignVisibility() {
+
+        const chosen = document.querySelector(
+            'input[name="operates_abroad"]:checked'
+        );
+
+        const yes = chosen && chosen.value === 'yes';
+
+        if (foreignBody) {
+            foreignBody.style.display = yes ? 'block' : 'none';
+        }
+
+        /* Offer an empty card straight away rather than a bare button. */
+        if (yes && foreignCards && foreignCards.children.length === 0) {
+            addForeignCard();
+        }
+    }
+
+    if (addForeign) {
+        addForeign.addEventListener('click', addForeignCard);
+    }
+
+    document.addEventListener('click', function (event) {
+
+        if (!event.target.closest('[data-remove-foreign]')) {
+            return;
+        }
+
+        const card = event.target.closest('[data-foreign-card]');
+
+        if (card) {
+            card.remove();
+            renumberForeignCards();
+        }
+    });
+
+    document
+        .querySelectorAll('input[name="operates_abroad"]')
+        .forEach(function (radio) {
+            radio.addEventListener('change', updateForeignVisibility);
+        });
+
+    updateForeignVisibility();
+
+
+    function headquartersAnswer() {
+
+        const chosen = document.querySelector(
+            'input[name="headquarters_in_kenya"]:checked'
+        );
+
+        return chosen ? chosen.value : '';
+    }
+
     function toggleInternational() {
 
         if (!type || !internationalSection) {
             return;
         }
 
-        const visible =
+        const international =
             type.value === 'international';
+
+        const answer = headquartersAnswer();
+
+        const abroad = international && answer === '0';
+        const showKenyan = !international || answer === '1';
+
+        const question =
+            document.querySelector('[data-headquarters-question]');
+
+        if (question) {
+            question.style.display = international ? 'block' : 'none';
+        }
+
+        const kenyanSection =
+            document.querySelector('[data-kenyan-head-office]');
+
+        if (kenyanSection) {
+            kenyanSection.style.display = showKenyan ? 'block' : 'none';
+        }
+
+        /*
+        | A hidden required field blocks the form with a message nobody
+        | can see, so required follows visibility.
+        */
+        document
+            .querySelectorAll('[data-kenyan-required="true"]')
+            .forEach(function (field) {
+                field.required = showKenyan;
+            });
+
+        const visible = abroad;
 
         internationalSection.style.display =
             visible ? 'block' : 'none';

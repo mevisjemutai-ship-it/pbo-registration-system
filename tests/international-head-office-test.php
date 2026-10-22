@@ -57,6 +57,21 @@ register_shutdown_function(static function () use ($configPath, $dbPath): void {
 $pdo = new PDO('sqlite:' . $dbPath);
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
+/*
+| The one MySQL function these pages use that SQLite has no equivalent
+| for: FIELD(value, a, b, c) gives the position of value in the list, and
+| the officials are ordered by it so they come out Chairperson,
+| Secretary, Treasurer rather than alphabetically.
+*/
+$field = static function (...$arguments): int {
+    $needle = array_shift($arguments);
+    $position = array_search($needle, $arguments, false);
+
+    return $position === false ? 0 : (int) $position + 1;
+};
+
+$pdo->sqliteCreateFunction('FIELD', $field, -1);
+
 $pdo->exec('
     CREATE TABLE pbo_applications (
         id INTEGER PRIMARY KEY,
@@ -120,14 +135,16 @@ $pdo->exec('
         tax_id_type TEXT, tax_id_number TEXT, phone_number TEXT, email TEXT
     );
     CREATE TABLE users (
-        id INTEGER PRIMARY KEY, full_name TEXT, username TEXT, role TEXT
+        id INTEGER PRIMARY KEY, full_name TEXT, username TEXT, role TEXT,
+        is_active INTEGER
     );
     CREATE TABLE application_reference_sequences (
         year INTEGER PRIMARY KEY, last_number INTEGER
     );
     CREATE TABLE application_audit_log (
         id INTEGER PRIMARY KEY, application_id INTEGER, user_id INTEGER,
-        action TEXT, field_name TEXT, old_value TEXT, new_value TEXT, created_at TEXT
+        action TEXT, description TEXT, changes TEXT, ip_address TEXT,
+        field_name TEXT, old_value TEXT, new_value TEXT, created_at TEXT
     );
 ');
 
@@ -237,10 +254,20 @@ $pdo->exec("
     FROM application_foreign_locations;
 ");
 
+$pdo->exec("
+    INSERT INTO users (id, full_name, username, role, is_active)
+    VALUES (1, 'TEST OFFICER', 'test.officer', 'admin', 1);
+");
+
 file_put_contents(
     $configPath,
     "<?php\n\$pdo = new PDO('sqlite:" . $dbPath . "');\n"
     . "\$pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);\n"
+    . "\$pdo->sqliteCreateFunction('FIELD', function (...\$a) {\n"
+    . "    \$n = array_shift(\$a);\n"
+    . "    \$p = array_search(\$n, \$a, false);\n"
+    . "    return \$p === false ? 0 : (int) \$p + 1;\n"
+    . "}, -1);\n"
     . "\$db = \$pdo;\n"
 );
 
@@ -251,7 +278,12 @@ file_put_contents(
 |--------------------------------------------------------------------------
 */
 
-function render(string $page, array $query = []): string
+function render(
+    string $page,
+    array $query = [],
+    array $session = [],
+    ?array $post = null
+): string
 {
     $command = 'php -d display_errors=1 -d error_reporting=E_ALL '
         . escapeshellarg(__DIR__ . '/_render-page.php')
@@ -260,6 +292,12 @@ function render(string $page, array $query = []): string
     $env = $_ENV + ['PATH' => getenv('PATH')];
     $env['PBO_TEST_PAGE'] = $page;
     $env['PBO_TEST_QUERY'] = http_build_query($query);
+    $env['PBO_TEST_SESSION'] = $session === []
+        ? ''
+        : (string) json_encode($session);
+    $env['PBO_TEST_POST'] = $post === null
+        ? ''
+        : (string) json_encode($post);
 
     $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
     $process = proc_open($command, $descriptors, $pipes, null, $env);
@@ -711,6 +749,357 @@ check('review: an international organization based here says so',
 
 check('review: and its Kenyan head office is still shown',
     str_contains($reviewKenya, 'UPPER HILL CHAMBERS'));
+
+
+/*
+|--------------------------------------------------------------------------
+| 8. The two edit pages
+|--------------------------------------------------------------------------
+|
+| Both are checked, not just one. They are near-identical files, and a
+| fix applied to one and forgotten in the other is how this codebase
+| ended up with two different ideas of what the overseas fields are
+| called.
+*/
+
+echo "8. The edit pages\n";
+
+/** The session an administrator needs before an edit page shows the form. */
+$editSession = static fn (int $id): array => [
+    'admin_edit_authorization' => [
+        'user_id' => 1,
+        'application_id' => $id,
+        'expires_at' => time() + 600,
+    ],
+];
+
+foreach (['applications/edit.php', 'applications/edit-submitted.php'] as $page) {
+
+    $short = basename($page);
+
+    foreach ([
+        'national'              => ['id' => 20, 'kenyan' => true,  'overseas' => false],
+        'international, in Kenya' => ['id' => 21, 'kenyan' => true,  'overseas' => false],
+        'international, abroad' => ['id' => 22, 'kenyan' => false, 'overseas' => true],
+    ] as $label => $case) {
+
+        $form = render($page, ['id' => $case['id']], $editSession($case['id']));
+
+        check($short . ', ' . $label . ': rendered without a PHP error',
+            !str_contains($form, 'Fatal error')
+                && !str_contains($form, 'Warning:')
+                && !str_contains($form, 'Authorization Required'));
+
+        $kenyan = (bool) preg_match(
+            '/data-kenyan-head-office\s*\n?\s*style="display:\s*block/', $form);
+
+        $overseas = (bool) preg_match(
+            '/id="international-section"\s*\n?\s*style="display:\s*block/', $form);
+
+        check($short . ', ' . $label . ': Kenyan card '
+            . ($case['kenyan'] ? 'shown' : 'hidden'), $kenyan === $case['kenyan']);
+
+        check($short . ', ' . $label . ': overseas card '
+            . ($case['overseas'] ? 'shown' : 'hidden'), $overseas === $case['overseas']);
+
+        check($short . ', ' . $label . ': never both at once', !($kenyan && $overseas));
+
+        check($short . ', ' . $label . ': the question is on the page',
+            str_contains($form, 'data-headquarters-question'));
+
+        check($short . ', ' . $label . ': areas outside Kenya are offered',
+            str_contains($form, 'name="operates_abroad"'));
+
+        check($short . ', ' . $label . ': required follows the visible card',
+            str_contains($form, 'data-kenyan-required="true"'));
+
+        $plain = preg_replace('/<!--.*?-->/s', '', $form) ?? '';
+        $plain = preg_replace('/<script\b.*?<\/script>/s', '', $plain) ?? '';
+        $plain = preg_replace('/<style\b.*?<\/style>/s', '', $plain) ?? '';
+        $plain = preg_replace('/<[^>]*>/', ' ', $plain) ?? '';
+
+        check($short . ', ' . $label . ': nothing visible says "Parent"',
+            !preg_match('/\bparent/i', $plain),
+            (string) (preg_match('/.{0,40}\bparent.{0,40}/i', $plain, $m) ? $m[0] : ''));
+
+        check($short . ', ' . $label . ': nothing says "Country of Origin"',
+            !preg_match('/country of origin/i', $plain));
+    }
+
+    /* The overseas card stands where the Kenyan one does, not at the foot. */
+    $abroadForm = render($page, ['id' => 22], $editSession(22));
+
+    $kenyanAt   = at($abroadForm, 'data-kenyan-head-office');
+    $overseasAt = at($abroadForm, 'id="international-section"');
+    $areasAt    = at($abroadForm, 'name="operates_abroad"');
+
+    check($short . ': the overseas card comes straight after the Kenyan one',
+        $kenyanAt > -1 && $overseasAt > $kenyanAt);
+
+    check($short . ': and BEFORE areas of operation, not after them',
+        $areasAt > -1 && $overseasAt < $areasAt);
+
+    check($short . ': the saved overseas details are on the form',
+        str_contains($abroadForm, 'CANADA'));
+
+    check($short . ': the saved country outside Kenya is on the form',
+        str_contains($abroadForm, 'FRANCE'));
+
+    check($short . ': countries are suggested as you type',
+        str_contains($abroadForm, 'id="country-list"'));
+
+    check($short . ': each country card posts an indexed row',
+        (bool) preg_match('/name="foreign_locations\[\d+\]\[country\]"/', $abroadForm));
+
+    /* The step numbers run 1, 2, 2, 3, 4... with no gap where 4 used to be. */
+    check($short . ': the step numbers have no gap',
+        !preg_match('/\n {13}8\. /', $abroadForm . file_get_contents($page)));
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| 9. Saving
+|--------------------------------------------------------------------------
+|
+| The render checks say the right card is on screen. This says the right
+| thing reaches the database, which is where a record actually gets
+| damaged.
+*/
+
+echo "9. Saving an edit\n";
+
+$savePost = static function (int $id, array $overrides) use ($pdo): array {
+
+    $application = $pdo->query(
+        'SELECT * FROM pbo_applications WHERE id = ' . $id
+    )->fetch(PDO::FETCH_ASSOC);
+
+    $address = $pdo->query(
+        'SELECT * FROM application_addresses WHERE application_id = ' . $id
+            . ' ORDER BY id DESC LIMIT 1'
+    )->fetch(PDO::FETCH_ASSOC) ?: [];
+
+    $base = [
+        'csrf_token' => 'test-token',
+        'application_id' => (string) $id,
+        'pbo_name' => (string) $application['pbo_name'],
+        'pbo_registration_number' => (string) $application['pbo_registration_number'],
+        'registration_date' => (string) $application['registration_date'],
+        'registration_type' => (string) $application['registration_type'],
+        'county' => (string) ($address['county'] ?? ''),
+        'town' => '',
+        'sub_county' => '',
+        'physical_address' => (string) ($address['physical_address'] ?? ''),
+        'postal_address' => (string) ($address['postal_address'] ?? ''),
+        'postal_code' => (string) ($address['postal_code'] ?? ''),
+        'phone_number' => (string) ($address['phone_number'] ?? ''),
+        'alternative_phone_number' => '',
+        'email' => (string) ($address['email'] ?? ''),
+        'financial_year_start_month' => '1',
+        'financial_year_end_month' => '12',
+        'objectives' => ['EDUCATION'],
+        'beneficiaries' => ['CHILDREN'],
+        'beneficiary_scope' => 'section_of_public',
+        'operating_locations' => [],
+
+        /*
+        | The three principal officials are required on this page, so a
+        | post that leaves them out is refused - correctly. Filling them
+        | in is what makes this a test of the head office change rather
+        | than a re-test of the officials rules.
+        */
+        'officials' => [
+            'CHAIRPERSON' => [
+                'full_name' => 'JANE WANJIRU',
+                'nationality' => 'KENYAN',
+                'kra_pin' => 'A001234567X',
+                'id_passport_number' => '12345678',
+                'phone_number' => '0712345678',
+            ],
+            'SECRETARY' => [
+                'full_name' => 'MARY OTIENO',
+                'nationality' => 'KENYAN',
+                'kra_pin' => 'A007654321Y',
+                'id_passport_number' => '87654321',
+                'phone_number' => '0733555666',
+            ],
+            'TREASURER' => [
+                'full_name' => 'PETER KAMAU',
+                'nationality' => 'KENYAN',
+                'kra_pin' => 'A001122334Z',
+                'id_passport_number' => '11223344',
+                'phone_number' => '0722333444',
+            ],
+        ],
+    ];
+
+    return $overrides + $base;
+};
+
+$saveSession = static fn (int $id): array => [
+    'csrf_token' => 'test-token',
+    'admin_edit_authorization' => [
+        'user_id' => 1,
+        'application_id' => $id,
+        'expires_at' => time() + 600,
+    ],
+];
+
+/*
+| Record 22 is international and based abroad, so it HAS an overseas row.
+| Say the head office is in Kenya instead: the overseas row must go,
+| rather than sitting in the register as a foreign head office that no
+| longer exists.
+*/
+$before = (int) $pdo->query(
+    'SELECT COUNT(*) FROM application_international_details WHERE application_id = 22'
+)->fetchColumn();
+
+check('record 22 starts with overseas details', $before === 1);
+
+render(
+    'applications/edit.php',
+    ['id' => 22],
+    $saveSession(22),
+    $savePost(22, ['headquarters_in_kenya' => '1'])
+);
+
+$after = (int) $pdo->query(
+    'SELECT COUNT(*) FROM application_international_details WHERE application_id = 22'
+)->fetchColumn();
+
+check('moving the head office to Kenya removes the overseas row', $after === 0);
+
+check('and the answer is written down, not left to be guessed',
+    (int) $pdo->query(
+        'SELECT headquarters_in_kenya FROM pbo_applications WHERE id = 22'
+    )->fetchColumn() === 1);
+
+/* Areas of operation outside Kenya, saved from a national organization. */
+render(
+    'applications/edit.php',
+    ['id' => 20],
+    $saveSession(20),
+    $savePost(20, [
+        'operates_abroad' => 'yes',
+        'foreign_locations' => [
+            ['country' => 'Rwanda', 'city' => 'Kigali', 'physical_address' => 'KN 4 Ave'],
+            ['country' => '', 'city' => 'nothing here'],
+        ],
+    ])
+);
+
+$saved = $pdo->query(
+    'SELECT country, city FROM application_foreign_locations
+      WHERE application_id = 20 ORDER BY country'
+)->fetchAll(PDO::FETCH_ASSOC);
+
+check('a national organization can save a country outside Kenya',
+    count($saved) === 1, 'saved ' . count($saved) . ' rows');
+
+check('and it is stored in block capitals like everything else',
+    ($saved[0]['country'] ?? '') === 'RWANDA', (string) ($saved[0]['country'] ?? ''));
+
+check('an empty card nobody filled in is dropped, not saved as a blank row',
+    !in_array('', array_column($saved, 'country'), true));
+
+/* And saying no again clears them. */
+render(
+    'applications/edit.php',
+    ['id' => 20],
+    $saveSession(20),
+    $savePost(20, ['operates_abroad' => 'no'])
+);
+
+check('saying no again clears the countries',
+    (int) $pdo->query(
+        'SELECT COUNT(*) FROM application_foreign_locations WHERE application_id = 20'
+    )->fetchColumn() === 0);
+
+
+/*
+|--------------------------------------------------------------------------
+| 10. Block capitals must not eat the code fields
+|--------------------------------------------------------------------------
+|
+| A regression found while writing the save test above, and the worst
+| one in this round: the block-capitals rule raised EVERY posted field,
+| including the ones holding a code rather than text. "national" became
+| "NATIONAL", the check looking for "national" failed, and every save on
+| the Organization page was refused with "Please select the Type of
+| Organization" - with the box correctly filled in. The form could not
+| be saved at all.
+|
+| Checked here at both levels: the rule itself, and a real save through
+| the page, because a unit check on the rule would not have caught the
+| page refusing to save.
+*/
+
+echo "10. Block capitals and the code fields\n";
+
+require_once $root . '/includes/text-case.php';
+
+foreach ([
+    'registration_type' => 'national',
+    'headquarters_in_kenya' => '1',
+    'beneficiary_scope' => 'section_of_public',
+    'operates_abroad' => 'yes',
+    'registration_date' => '2019-03-14',
+] as $field => $value) {
+    check('a code field keeps its value: ' . $field,
+        pboStoredCase($field, $value) === $value,
+        pboStoredCase($field, $value));
+}
+
+foreach ([
+    'pbo_name' => 'amani children trust',
+    'county' => 'nairobi city county',
+    'parent_organization_name' => 'amani international',
+    'country_of_origin' => 'canada',
+    'physical_address' => 'ring road plaza',
+] as $field => $value) {
+    check('and real text is still raised: ' . $field,
+        pboStoredCase($field, $value) === mb_strtoupper($value),
+        pboStoredCase($field, $value));
+}
+
+check('an email is still lower-cased rather than raised',
+    pboStoredCase('email', 'Info@Amani.Example') === 'info@amani.example');
+
+/* And the save the bug blocked. */
+$created = render(
+    'applications/create.php',
+    ['id' => 10],
+    ['csrf_token' => 'test-token'],
+    [
+        'csrf_token' => 'test-token',
+        'application_id' => '10',
+        'form_action' => 'save',
+        'pbo_name' => 'Amani Children Trust',
+        'pbo_registration_number' => 'PBO/2019/0041',
+        'registration_date' => '2019-03-14',
+        'registration_type' => 'national',
+        'county' => 'Nairobi City County',
+        'physical_address' => 'Ring Road Plaza',
+        'postal_address' => 'P.O. Box 1234',
+        'phone_number' => '0712345678',
+        'email' => 'info@amani.example',
+    ]
+);
+
+check('the entry form accepts a correctly filled in Type of Organization',
+    !str_contains($created, 'Please select the Type of Organization'));
+
+check('and the name it saved is in block capitals',
+    (string) $pdo->query(
+        'SELECT pbo_name FROM pbo_applications WHERE id = 10'
+    )->fetchColumn() === 'AMANI CHILDREN TRUST');
+
+check('while the type it saved is still a code the portal can read',
+    (string) $pdo->query(
+        'SELECT registration_type FROM pbo_applications WHERE id = 10'
+    )->fetchColumn() === 'national');
 
 
 /*
