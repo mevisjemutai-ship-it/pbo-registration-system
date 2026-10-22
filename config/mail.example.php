@@ -14,10 +14,8 @@
 |   - Create an App Password at https://myaccount.google.com/apppasswords
 |   - Paste the 16-character App Password below (not your normal password).
 |
-| Office email later: ask IT for the SMTP host, port, encryption,
-| username and password, and change only this file.
-|
-*/
+/*
+
 
 return [
     'host'        => 'smtp.gmail.com',
